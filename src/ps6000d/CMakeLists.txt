@@ -4,11 +4,13 @@ if(WIN32)
 	endif()
 
 #Set up include paths
-include_directories('/opt/picoscope/include/libps6000a')
+include_directories('/opt/picoscope/include/')
 
 ###############################################################################
 #C++ compilation
 add_executable(ps6000d
+	ScpiServerThread.cpp
+
 	main.cpp
 )
 
