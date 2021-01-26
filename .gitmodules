@@ -1,0 +1,6 @@
+[submodule "lib/log"]
+	path = lib/log
+	url = ../logtools
+[submodule "lib/xptools"]
+	path = lib/xptools
+	url = ../xptools
