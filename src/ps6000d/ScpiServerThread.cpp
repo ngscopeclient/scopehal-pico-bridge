@@ -33,47 +33,51 @@
 	@brief SCPI server. Control plane traffic only, no waveform data.
 
 	SCPI commands supported:
+
 		*IDN?
 			Returns a standard SCPI instrument identification string
 
 		CHANS?
 			Returns the number of channels on the instrument.
 
-		[chan]:ON
-			Turns the channel on
+		[chan]:COUP [DC1M|AC1M|DC50]
+			Sets channel coupling
 
 		[chan]:OFF
 			Turns the channel off
 
-		[chan]:COUP [DC1M|AC1M|DC50]
-			Sets channel coupling
-
 		[chan]:OFFS [num]
 			Sets channel offset to num volts
+
+		[chan]:ON
+			Turns the channel on
 
 		[chan]:RANGE [num]
 			Sets channel full-scale range to num volts
 
-		RATES?
-			Returns a comma separated list of sampling rates (in femtoseconds)
+		DEPTH [num]
+			Sets memory depth
+
+		DEPTHS?
+			Returns the set of available memory depths
+
+		EXIT
+			Terminates the connection
 
 		RATE [num]
 			Sets sample rate
 
-		START
-			Arms the trigger
+		RATES?
+			Returns a comma separated list of sampling rates (in femtoseconds)
 
 		SINGLE
 			Arms the trigger in one-shot mode
 
+		START
+			Arms the trigger
+
 		STOP
 			Disarms the trigger
-
-		CONNECT
-			Waits for connection on the data plane socket
-
-		EXIT
-			Terminates the connection
  */
 
 #include "ps6000d.h"
@@ -103,8 +107,9 @@ size_t g_captureMemDepth = 0;
 
 uint32_t g_timebase = 0;
 
-volatile bool g_triggerArmed = false;
-volatile bool g_triggerOneShot = false;
+bool g_triggerArmed = false;
+bool g_triggerOneShot = false;
+bool g_memDepthChanged = false;
 
 void UpdateChannel(size_t chan);
 
@@ -221,6 +226,38 @@ void ScpiServerThread()
 							ret += to_string(intervalFs) + ",";
 						}
 					}
+					ScpiSend(client, ret);
+				}
+
+				//Get memory depths
+				else if(cmd == "DEPTHS")
+				{
+					string ret = "";
+
+					lock_guard<mutex> lock(g_mutex);
+					double intervalNs;
+					size_t maxSamples;
+
+					//Ask for max memory depth at 1.25 Gsps. Why does legal memory depend on sample rate?
+					if(PICO_OK == ps6000aGetTimebase(g_hScope, 2, 1, &intervalNs, &maxSamples, 0))
+					{
+						//Seems like there's no restrictions on actual memory depth other than an upper bound.
+						//To keep things simple, report 1-2-5 series from 10K samples up to the actual max depth
+
+						for(size_t base = 10000; base < maxSamples; base *= 10)
+						{
+							const size_t muls[] = {1, 2, 5};
+							for(auto m : muls)
+							{
+								size_t depth = m * base;
+								if(depth < maxSamples)
+									ret += to_string(depth) + ",";
+							}
+						}
+
+						ret += to_string(maxSamples) + ",";
+					}
+
 					ScpiSend(client, ret);
 				}
 
@@ -351,6 +388,8 @@ void ScpiServerThread()
 
 			else if( (cmd == "RATE") && (args.size() == 1) )
 			{
+				lock_guard<mutex> lock(g_mutex);
+
 				//Convert sample rate to sample period
 				auto rate = stoull(args[0]);
 				g_sampleInterval = 1e15 / rate;
@@ -365,6 +404,12 @@ void ScpiServerThread()
 					timebase = round(clkdiv) + 4;
 
 				g_timebase = timebase;
+			}
+
+			else if( (cmd == "DEPTH") && (args.size() == 1) )
+			{
+				lock_guard<mutex> lock(g_mutex);
+				g_memDepth = stoull(args[0]);
 			}
 
 			else if( (cmd == "START") || (cmd == "SINGLE") )
@@ -389,6 +434,9 @@ void ScpiServerThread()
 					LogVerbose("Ignoring START command because no channels are active\n");
 					continue;
 				}
+
+				if(g_captureMemDepth != g_memDepth)
+					g_memDepthChanged = true;
 
 				g_channelOnDuringArm = g_channelOn;
 				g_captureMemDepth = g_memDepth;

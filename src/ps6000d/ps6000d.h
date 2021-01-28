@@ -69,8 +69,9 @@ extern uint32_t g_timebase;
 extern int64_t g_sampleInterval;
 extern int64_t g_sampleIntervalDuringArm;
 
-extern volatile bool g_triggerArmed;
-extern volatile bool g_triggerOneShot;
+extern bool g_triggerArmed;
+extern bool g_triggerOneShot;
+extern bool g_memDepthChanged;
 
 extern std::mutex g_mutex;
 

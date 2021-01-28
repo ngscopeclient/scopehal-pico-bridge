@@ -51,34 +51,18 @@ void WaveformServerThread()
 
 	//Set up buffers
 	map<size_t, int16_t*> waveformBuffers;
-	for(size_t i=0; i<g_numChannels; i++)
-	{
-		lock_guard<mutex> lock(g_mutex);
-
-		//Allocate memory if needed
-		waveformBuffers[i] = new int16_t[g_memDepth];
-		memset(waveformBuffers[i], 0x00, g_memDepth * sizeof(int16_t));
-
-		//Give it to the scope
-		auto status = ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)i, waveformBuffers[i],
-			g_memDepth, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_ADD);
-		if(status != PICO_OK)
-		{
-			LogFatal("ps6000aSetDataBuffer failed (code %d)\n", status);
-		}
-	}
 
 	size_t numSamples = 0;
 	uint16_t numchans;
 	while(!g_waveformThreadQuit)
 	{
-		int16_t status;
+		int16_t ready;
 		{
 			lock_guard<mutex> lock(g_mutex);
-			ps6000aIsReady(g_hScope, &status);
+			ps6000aIsReady(g_hScope, &ready);
 		}
 
-		if( (status == 0) || (!g_triggerArmed) )
+		if( (ready == 0) || (!g_triggerArmed) )
 		{
 			usleep(1000);
 			continue;
@@ -90,10 +74,38 @@ void WaveformServerThread()
 			//Stop the trigger
 			ps6000aStop(g_hScope);
 
+			//Set up buffers if needed
+			if(g_memDepthChanged || waveformBuffers.empty())
+			{
+				LogDebug("Reallocating buffers\n");
+
+				for(size_t i=0; i<g_numChannels; i++)
+				{
+					ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)i, NULL,
+						0, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_CLEAR_ALL);
+				}
+				for(size_t i=0; i<g_numChannels; i++)
+				{
+					//Allocate memory if needed
+					if(waveformBuffers[i])
+						delete[] waveformBuffers[i];
+					waveformBuffers[i] = new int16_t[g_captureMemDepth];
+					memset(waveformBuffers[i], 0x00, g_captureMemDepth * sizeof(int16_t));
+
+					//Give it to the scope, removing any other buffer we might have
+					auto status = ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)i, waveformBuffers[i],
+						g_captureMemDepth, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_ADD);
+					if(status != PICO_OK)
+						LogFatal("ps6000aSetDataBuffer failed (code %d)\n", status);
+				}
+
+				g_memDepthChanged = false;
+			}
+
 			//Download the data from the scope
 			numSamples = g_captureMemDepth;
 			int16_t overflow = 0;
-			status = ps6000aGetValues(g_hScope, 0, &numSamples, 1, PICO_RATIO_MODE_RAW, 0, &overflow);
+			auto status = ps6000aGetValues(g_hScope, 0, &numSamples, 1, PICO_RATIO_MODE_RAW, 0, &overflow);
 			if(PICO_OK != status)
 				LogFatal("ps6000aGetValues (code %d)\n", status);
 
@@ -137,14 +149,22 @@ void WaveformServerThread()
 		{
 			lock_guard<mutex> lock(g_mutex);
 
+			if(g_captureMemDepth != g_memDepth)
+				g_memDepthChanged = true;
+
 			g_channelOnDuringArm = g_channelOn;
 			g_captureMemDepth = g_memDepth;
 			g_sampleIntervalDuringArm = g_sampleInterval;
 
 			//Restart
-			status = ps6000aRunBlock(g_hScope, g_captureMemDepth/2, g_captureMemDepth/2, g_timebase, NULL, 0, NULL, NULL);
+			auto status = ps6000aRunBlock(g_hScope, g_captureMemDepth/2, g_captureMemDepth/2,
+				g_timebase, NULL, 0, NULL, NULL);
 			if(status != PICO_OK)
 				LogFatal("ps6000aRunBlock in WaveformServerThread failed, code %d\n", status);
 		}
 	}
+
+	//Clean up temporary buffers
+	for(auto it : waveformBuffers)
+		delete[] it.second;
 }
