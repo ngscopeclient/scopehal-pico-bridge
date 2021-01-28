@@ -39,6 +39,7 @@
 #include "../../lib/xptools/Socket.h"
 #include <thread>
 #include <map>
+#include <mutex>
 
 #include "/opt/picoscope/include/libps6000a/ps6000aApi.h"
 #include "/opt/picoscope/include/libps6000a/PicoStatus.h"
@@ -61,7 +62,16 @@ extern volatile bool g_waveformThreadQuit;
 extern size_t g_captureMemDepth;
 extern size_t g_memDepth;
 extern std::map<size_t, bool> g_channelOnDuringArm;
+extern std::map<size_t, bool> g_channelOn;
 extern std::map<size_t, double> g_roundedRange;
+
+extern uint32_t g_timebase;
+extern int64_t g_sampleInterval;
+extern int64_t g_sampleIntervalDuringArm;
+
 extern volatile bool g_triggerArmed;
+extern volatile bool g_triggerOneShot;
+
+extern std::mutex g_mutex;
 
 #endif

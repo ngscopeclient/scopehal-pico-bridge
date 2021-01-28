@@ -39,8 +39,6 @@ using namespace std;
 
 volatile bool g_waveformThreadQuit = false;
 
-//TODO: mutexing (driver is NOT thread safe!)
-
 void WaveformServerThread()
 {
 	Socket client = g_dataSocket.Accept();
@@ -55,6 +53,8 @@ void WaveformServerThread()
 	map<size_t, int16_t*> waveformBuffers;
 	for(size_t i=0; i<g_numChannels; i++)
 	{
+		lock_guard<mutex> lock(g_mutex);
+
 		//Allocate memory if needed
 		waveformBuffers[i] = new int16_t[g_memDepth];
 		memset(waveformBuffers[i], 0x00, g_memDepth * sizeof(int16_t));
@@ -68,10 +68,15 @@ void WaveformServerThread()
 		}
 	}
 
+	size_t numSamples = 0;
+	uint16_t numchans;
 	while(!g_waveformThreadQuit)
 	{
 		int16_t status;
-		ps6000aIsReady(g_hScope, &status);
+		{
+			lock_guard<mutex> lock(g_mutex);
+			ps6000aIsReady(g_hScope, &status);
+		}
 
 		if( (status == 0) || (!g_triggerArmed) )
 		{
@@ -79,26 +84,33 @@ void WaveformServerThread()
 			continue;
 		}
 
-		//Stop the trigger
-		ps6000aStop(g_hScope);
-
-		//Download the data from the scope
-		size_t numSamples = g_captureMemDepth;
-		int16_t overflow = 0;
-		status = ps6000aGetValues(g_hScope, 0, &numSamples, 1, PICO_RATIO_MODE_RAW, 0, &overflow);
-		if(PICO_OK != status)
-			LogFatal("ps6000aGetValues (code %d)\n", status);
-
-		//Figure out how many channels are active in this capture
-		uint16_t numchans = 0;
-		for(size_t i=0; i<g_numChannels; i++)
 		{
-			if(g_channelOnDuringArm[i])
-				numchans ++;
+			lock_guard<mutex> lock(g_mutex);
+
+			//Stop the trigger
+			ps6000aStop(g_hScope);
+
+			//Download the data from the scope
+			numSamples = g_captureMemDepth;
+			int16_t overflow = 0;
+			status = ps6000aGetValues(g_hScope, 0, &numSamples, 1, PICO_RATIO_MODE_RAW, 0, &overflow);
+			if(PICO_OK != status)
+				LogFatal("ps6000aGetValues (code %d)\n", status);
+
+			//Figure out how many channels are active in this capture
+			numchans = 0;
+			for(size_t i=0; i<g_numChannels; i++)
+			{
+				if(g_channelOnDuringArm[i])
+					numchans ++;
+			}
 		}
 
 		//Send the channel count to the client
 		client.SendLooped((uint8_t*)&numchans, sizeof(numchans));
+
+		//Send sample rate to the client
+		client.SendLooped((uint8_t*)&g_sampleIntervalDuringArm, sizeof(g_sampleIntervalDuringArm));
 
 		//TODO: send overflow flags to client
 
@@ -118,9 +130,21 @@ void WaveformServerThread()
 			}
 		}
 
-		//Restart
-		status = ps6000aRunBlock(g_hScope, g_captureMemDepth/2, g_captureMemDepth/2, 2, NULL, 0, NULL, NULL);
-		if(status != PICO_OK)
-			LogFatal("ps6000aRunBlock failed, code %d\n", status);
+		//Re-arm the trigger if doing repeating triggers
+		if(g_triggerOneShot)
+			g_triggerArmed = false;
+		else
+		{
+			lock_guard<mutex> lock(g_mutex);
+
+			g_channelOnDuringArm = g_channelOn;
+			g_captureMemDepth = g_memDepth;
+			g_sampleIntervalDuringArm = g_sampleInterval;
+
+			//Restart
+			status = ps6000aRunBlock(g_hScope, g_captureMemDepth/2, g_captureMemDepth/2, g_timebase, NULL, 0, NULL, NULL);
+			if(status != PICO_OK)
+				LogFatal("ps6000aRunBlock in WaveformServerThread failed, code %d\n", status);
+		}
 	}
 }

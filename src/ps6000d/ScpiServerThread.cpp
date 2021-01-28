@@ -57,8 +57,14 @@
 		RATES?
 			Returns a comma separated list of sampling rates (in femtoseconds)
 
+		RATE [num]
+			Sets sample rate
+
 		START
 			Arms the trigger
+
+		SINGLE
+			Arms the trigger in one-shot mode
 
 		STOP
 			Disarms the trigger
@@ -72,6 +78,7 @@
 
 #include "ps6000d.h"
 #include <string.h>
+#include <math.h>
 
 using namespace std;
 
@@ -86,15 +93,22 @@ map<size_t, PICO_CONNECT_PROBE_RANGE> g_range;
 map<size_t, double> g_roundedRange;
 map<size_t, double> g_offset;
 map<size_t, PICO_BANDWIDTH_LIMITER> g_bandwidth;
-size_t g_memDepth = 100000;
+size_t g_memDepth = 1000000;
+int64_t g_sampleInterval = 0;	//in fs
 
 //Copy of state at timestamp of last arm event
 map<size_t, bool> g_channelOnDuringArm;
+int64_t g_sampleIntervalDuringArm = 0;
 size_t g_captureMemDepth = 0;
 
+uint32_t g_timebase = 0;
+
 volatile bool g_triggerArmed = false;
+volatile bool g_triggerOneShot = false;
 
 void UpdateChannel(size_t chan);
+
+std::mutex g_mutex;
 
 /**
 	@brief Sends a SCPI reply (terminated by newline)
@@ -142,8 +156,6 @@ void ScpiServerThread()
 		g_bandwidth[i] = PICO_BW_FULL;
 	}
 
-	size_t maxTimebases = 100;
-
 	while(true)
 	{
 		Socket client = g_scpiSocket.Accept();
@@ -188,8 +200,18 @@ void ScpiServerThread()
 				{
 					string ret = "";
 
+					lock_guard<mutex> lock(g_mutex);
+
 					//Enumerate timebases
-					for(size_t i=0; i<maxTimebases; i++)
+					//Don't report every single legal timebase as there's way too many, the list box would be huge!
+					//Report the first nine, then go to larger steps
+					size_t vec[] =
+					{
+						0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+						14, 29, 54, 104, 129, 254, 504, 629, 1254, 2504, 3129, 5004, 6254, 15629, 31254,
+						62504, 156254, 312504, 625004, 1562504
+					};
+					for(auto i : vec)
 					{
 						double intervalNs;
 						size_t maxSamples;
@@ -211,17 +233,20 @@ void ScpiServerThread()
 
 			else if(cmd == "ON")
 			{
+				lock_guard<mutex> lock(g_mutex);
 				g_channelOn[channelId] = true;
 				UpdateChannel(channelId);
 			}
 			else if(cmd == "OFF")
 			{
+				lock_guard<mutex> lock(g_mutex);
 				g_channelOn[channelId] = false;
 				UpdateChannel(channelId);
 			}
 
-			else if(cmd == "COUP")
+			else if( (cmd == "COUP") && (args.size() == 1) )
 			{
+				lock_guard<mutex> lock(g_mutex);
 				if(args[0] == "DC1M")
 					g_coupling[channelId] = PICO_DC;
 				else if(args[0] == "AC1M")
@@ -232,15 +257,21 @@ void ScpiServerThread()
 				UpdateChannel(channelId);
 			}
 
-			else if(cmd == "OFFS")
+			else if( (cmd == "OFFS") && (args.size() == 1) )
 			{
+				lock_guard<mutex> lock(g_mutex);
 				g_offset[channelId] = stod(args[0]);
 				UpdateChannel(channelId);
 			}
 
-			else if(cmd == "RANGE")
+			else if( (cmd == "RANGE") && (args.size() == 1) )
 			{
+				lock_guard<mutex> lock(g_mutex);
 				auto range = stod(args[0]);
+
+				//If 50 ohm coupling, cap hardware voltage range to 5V
+				if(g_coupling[channelId] == PICO_DC_50OHM)
+					range = min(range, 5.0);
 
 				if(range > 100)
 				{
@@ -313,18 +344,38 @@ void ScpiServerThread()
 					g_roundedRange[channelId] = 0.01;
 				}
 
+				//LogDebug("Requested %f V full-scale range. Got %f\n", range, g_roundedRange[channelId]);
+
 				UpdateChannel(channelId);
 			}
 
-			else if(cmd == "START")
+			else if( (cmd == "RATE") && (args.size() == 1) )
 			{
+				//Convert sample rate to sample period
+				auto rate = stoull(args[0]);
+				g_sampleInterval = 1e15 / rate;
+				double period_ns = 1e9 / rate;
+
+				//Find closest timebase setting
+				double clkdiv = period_ns / 0.2;
+				int timebase;
+				if(period_ns < 5)
+					timebase = round(log(clkdiv)/log(2));
+				else
+					timebase = round(clkdiv) + 4;
+
+				g_timebase = timebase;
+			}
+
+			else if( (cmd == "START") || (cmd == "SINGLE") )
+			{
+				lock_guard<mutex> lock(g_mutex);
+
 				if(g_triggerArmed)
 				{
 					LogVerbose("Ignoring START command because trigger is already armed\n");
 					continue;
 				}
-
-				LogDebug("arming trigger\n");
 
 				bool anyChannels = false;
 				for(size_t i=0; i<g_numChannels; i++)
@@ -341,22 +392,25 @@ void ScpiServerThread()
 
 				g_channelOnDuringArm = g_channelOn;
 				g_captureMemDepth = g_memDepth;
+				g_sampleIntervalDuringArm = g_sampleInterval;
 
 				//Start the capture
-				auto status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, 2, NULL, 0, NULL, NULL);
+				auto status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
 				if(status != PICO_OK)
 					LogFatal("ps6000aRunBlock failed, code %d\n", status);
 
 				g_triggerArmed = true;
+				g_triggerOneShot = (cmd == "SINGLE");
 			}
 
 			else if(cmd == "STOP")
 			{
+				lock_guard<mutex> lock(g_mutex);
+
 				ps6000aStop(g_hScope);
 				g_triggerArmed = false;
 			}
 
-			//TODO: range
 			//TODO: bandwidth limiter
 
 			//Unknown
