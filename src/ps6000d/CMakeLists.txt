@@ -10,6 +10,7 @@ include_directories('/opt/picoscope/include/')
 #C++ compilation
 add_executable(ps6000d
 	ScpiServerThread.cpp
+	WaveformServerThread.cpp
 
 	main.cpp
 )

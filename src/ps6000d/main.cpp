@@ -67,8 +67,10 @@ string g_serial;
 string g_fwver;
 
 int16_t g_hScope = 0;
+size_t g_numChannels = 0;
 
 Socket g_scpiSocket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+Socket g_dataSocket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
 
 int main(int argc, char* argv[])
 {
@@ -209,17 +211,22 @@ int main(int argc, char* argv[])
 			LogVerbose("IPP version:      %s\n", buf);
 	}
 
-	//TODO: Launch the data plane socket server
+	g_numChannels = g_model[1] - '0';
+
+	//Initial channel state setup
+	for(size_t i=0; i<g_numChannels; i++)
+		ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)i);
+
+	//Configure the data plane socket
+	g_dataSocket.Bind(waveform_port);
+	g_dataSocket.Listen();
 
 	//Launch the control plane socket server
 	g_scpiSocket.Bind(scpi_port);
 	g_scpiSocket.Listen();
-	thread scpiThread(ScpiServerThread);
+	ScpiServerThread();
 
-	//TODO: proper clean shutdown with ^C
-
-	//Wait for threads to terminate
-	scpiThread.join();
+	//TODO: proper clean shutdown with ^C?
 
 	//Done
 	ps6000aCloseUnit(g_hScope);
