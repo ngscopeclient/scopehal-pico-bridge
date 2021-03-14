@@ -159,7 +159,12 @@ void WaveformServerThread()
 			//Restart
 			auto status = ps6000aRunBlock(g_hScope, g_captureMemDepth/2, g_captureMemDepth/2,
 				g_timebase, NULL, 0, NULL, NULL);
-			if(status != PICO_OK)
+			if(status == PICO_HARDWARE_CAPTURING_CALL_STOP)
+			{
+				//A start command was received from the socket thread.
+				//No need to start again
+			}
+			else if(status != PICO_OK)
 				LogFatal("ps6000aRunBlock in WaveformServerThread failed, code %d\n", status);
 		}
 	}

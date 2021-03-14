@@ -78,6 +78,18 @@
 
 		STOP
 			Disarms the trigger
+
+		TRIG:DELAY [delay]
+			Sets trigger delay (in fs)
+
+		TRIG:EDGE:DIR [direction]
+			Sets trigger direction. Legal values are RISING, FALLING, or ANY.
+
+		TRIG:LEV [level]
+			Selects trigger level (in volts)
+
+		TRIG:SOU [chan]
+			Selects the channel as the trigger source
  */
 
 #include "ps6000d.h"
@@ -111,6 +123,13 @@ bool g_triggerArmed = false;
 bool g_triggerOneShot = false;
 bool g_memDepthChanged = false;
 
+//Trigger state (for now, only simple single-channel trigger supported)
+uint64_t g_triggerDelay = 0;
+PICO_THRESHOLD_DIRECTION g_triggerDirection = PICO_RISING;
+float g_triggerVoltage = 0;
+size_t g_triggerChannel = 0;
+
+void UpdateTrigger();
 void UpdateChannel(size_t chan);
 
 std::mutex g_mutex;
@@ -160,6 +179,9 @@ void ScpiServerThread()
 		g_offset[i] = 0;
 		g_bandwidth[i] = PICO_BW_FULL;
 	}
+
+	//Push initial trigger config
+	UpdateTrigger();
 
 	while(true)
 	{
@@ -382,8 +404,13 @@ void ScpiServerThread()
 				}
 
 				//LogDebug("Requested %f V full-scale range. Got %f\n", range, g_roundedRange[channelId]);
-
 				UpdateChannel(channelId);
+
+				//Update trigger if this is the trigger channel.
+				//Trigger is digital and threshold is specified in ADC counts.
+				//We want to maintain constant trigger level in volts, not ADC counts.
+				if(g_triggerChannel == channelId)
+					UpdateTrigger();
 			}
 
 			else if( (cmd == "RATE") && (args.size() == 1) )
@@ -459,6 +486,56 @@ void ScpiServerThread()
 				g_triggerArmed = false;
 			}
 
+			else if(subject == "TRIG")
+			{
+				if( (cmd == "EDGE:DIR") && (args.size() == 1) )
+				{
+					lock_guard<mutex> lock(g_mutex);
+
+					if(args[0] == "RISING")
+						g_triggerDirection = PICO_RISING;
+					else if(args[0] == "FALLING")
+						g_triggerDirection = PICO_FALLING;
+					else if(args[0] == "ANY")
+						g_triggerDirection = PICO_RISING_OR_FALLING;
+
+					UpdateTrigger();
+				}
+
+				else if( (cmd == "LEV") && (args.size() == 1) )
+				{
+					lock_guard<mutex> lock(g_mutex);
+
+					g_triggerVoltage = stof(args[0]);
+					UpdateTrigger();
+				}
+
+				else if( (cmd == "SOU") && (args.size() == 1) )
+				{
+					lock_guard<mutex> lock(g_mutex);
+					g_triggerChannel = args[0][0] - 'A';
+
+					UpdateTrigger();
+				}
+
+				else if( (cmd == "DELAY") && (args.size() == 1) )
+				{
+					lock_guard<mutex> lock(g_mutex);
+
+					g_triggerDelay = stoull(args[0]);
+					UpdateTrigger();
+				}
+
+				else
+				{
+					LogDebug("Unrecognized trigger command received: %s\n", line.c_str());
+					LogIndenter li;
+					LogDebug("Command: %s\n", cmd.c_str());
+					for(auto arg : args)
+						LogDebug("Arg: %s\n", arg.c_str());
+				}
+			}
+
 			//TODO: bandwidth limiter
 
 			//Unknown
@@ -498,7 +575,8 @@ void ParseScpiLine(const string& line, string& subject, string& cmd, bool& query
 	{
 		//If there's no colon in the command, the first block is the command.
 		//If there is one, the first block is the subject and the second is the command.
-		if(line[i] == ':')
+		//If more than one, treat it as freeform text in the command.
+		if( (line[i] == ':') && subject.empty() )
 		{
 			subject = tmp;
 			tmp = "";
@@ -555,4 +633,35 @@ void UpdateChannel(size_t chan)
 	}
 	else
 		ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)chan);
+}
+
+/**
+	@brief Pushes trigger configuration to the instrument
+ */
+void UpdateTrigger()
+{
+	//Convert threshold from volts to ADC counts
+	float offset = g_offset[g_triggerChannel];
+	float scale = g_roundedRange[g_triggerChannel] / 32512;
+	float trig_code = (g_triggerVoltage - offset) / scale;
+
+	//TODO: Convert delay from fs to native units (samples? ps?)
+	uint64_t delay = 0;
+
+	ps6000aSetSimpleTrigger(
+		g_hScope,
+		1,
+		(PICO_CHANNEL)g_triggerChannel,
+		round(trig_code),
+		g_triggerDirection,
+		delay,
+		0);
+
+	if(g_triggerArmed)
+	{
+		ps6000aStop(g_hScope);
+		auto status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
+		if(status != PICO_OK)
+			LogFatal("ps6000aRunBlock failed, code %d\n", status);
+	}
 }

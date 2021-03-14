@@ -34,6 +34,7 @@
  */
 
 #include "ps6000d.h"
+#include <signal.h>
 
 using namespace std;
 
@@ -71,6 +72,8 @@ size_t g_numChannels = 0;
 
 Socket g_scpiSocket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
 Socket g_dataSocket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+
+void OnQuit(int signal);
 
 int main(int argc, char* argv[])
 {
@@ -217,6 +220,9 @@ int main(int argc, char* argv[])
 	for(size_t i=0; i<g_numChannels; i++)
 		ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)i);
 
+	//Set up signal handlers
+	signal(SIGINT, OnQuit);
+
 	//Configure the data plane socket
 	g_dataSocket.Bind(waveform_port);
 	g_dataSocket.Listen();
@@ -226,9 +232,16 @@ int main(int argc, char* argv[])
 	g_scpiSocket.Listen();
 	ScpiServerThread();
 
-	//TODO: proper clean shutdown with ^C?
-
 	//Done
 	ps6000aCloseUnit(g_hScope);
 	return 0;
+}
+
+void OnQuit(int /*signal*/)
+{
+	LogNotice("Shutting down...\n");
+
+	lock_guard<mutex> lock(g_mutex);
+	ps6000aCloseUnit(g_hScope);
+	exit(0);
 }
