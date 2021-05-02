@@ -181,7 +181,10 @@ void ScpiServerThread()
 	}
 
 	//Push initial trigger config
-	UpdateTrigger();
+	{
+		lock_guard<mutex> lock(g_mutex);
+		UpdateTrigger();
+	}
 
 	while(true)
 	{
@@ -470,11 +473,7 @@ void ScpiServerThread()
 				g_sampleIntervalDuringArm = g_sampleInterval;
 
 				//Start the capture
-				auto status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
-				if(status != PICO_OK)
-					LogFatal("ps6000aRunBlock failed, code %d\n", status);
-
-				g_triggerArmed = true;
+				StartCapture(false);
 				g_triggerOneShot = (cmd == "SINGLE");
 			}
 
@@ -629,7 +628,15 @@ void UpdateChannel(size_t chan)
 	if(g_channelOn[chan])
 	{
 		ps6000aSetChannelOn(g_hScope, (PICO_CHANNEL)chan,
-			g_coupling[chan], g_range[chan], g_offset[chan], g_bandwidth[chan]);
+			g_coupling[chan], g_range[chan], -g_offset[chan], g_bandwidth[chan]);
+
+		/*
+		//Get the min/max allowed offset
+		double maxoff;
+		double minoff;
+		ps6000aGetAnalogueOffsetLimits(g_hScope, g_range[chan], g_coupling[chan], &maxoff, &minoff);
+		LogDebug("maxoff = %f, minoff = %f\n", maxoff, minoff);
+		*/
 	}
 	else
 		ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)chan);
@@ -643,7 +650,10 @@ void UpdateTrigger()
 	//Convert threshold from volts to ADC counts
 	float offset = g_offset[g_triggerChannel];
 	float scale = g_roundedRange[g_triggerChannel] / 32512;
+	if(scale == 0)
+		scale = 1;
 	float trig_code = (g_triggerVoltage - offset) / scale;
+	//LogDebug("UpdateTrigger: trig_code = %.0f for %f V, scale=%f\n", round(trig_code), g_triggerVoltage, scale);
 
 	//TODO: Convert delay from fs to native units (samples? ps?)
 	uint64_t delay = 0;
@@ -658,10 +668,26 @@ void UpdateTrigger()
 		0);
 
 	if(g_triggerArmed)
-	{
+		StartCapture(true);
+}
+
+void StartCapture(bool stopFirst)
+{
+	if(stopFirst)
 		ps6000aStop(g_hScope);
-		auto status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
-		if(status != PICO_OK)
-			LogFatal("ps6000aRunBlock failed, code %d\n", status);
+
+	auto status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
+
+	//not sure why this happens...
+	if(status == PICO_HARDWARE_CAPTURING_CALL_STOP)
+	{
+		LogWarning("Got PICO_HARDWARE_CAPTURING_CALL_STOP (but scope should have been stopped already)\n");
+		ps6000aStop(g_hScope);
+		status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
 	}
+
+	if(status != PICO_OK)
+		LogFatal("ps6000aRunBlock failed, code %d / 0x%x\n", status, status);
+
+	g_triggerArmed = true;
 }

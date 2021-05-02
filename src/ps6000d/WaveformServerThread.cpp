@@ -72,7 +72,11 @@ void WaveformServerThread()
 			lock_guard<mutex> lock(g_mutex);
 
 			//Stop the trigger
-			ps6000aStop(g_hScope);
+			auto status = ps6000aStop(g_hScope);
+			if(PICO_OK != status)
+				LogFatal("ps6000aStop failed (code 0x%x)\n", status);
+
+			//Verify it's actually stopped
 
 			//Set up buffers if needed
 			if(g_memDepthChanged || waveformBuffers.empty())
@@ -93,10 +97,10 @@ void WaveformServerThread()
 					memset(waveformBuffers[i], 0x00, g_captureMemDepth * sizeof(int16_t));
 
 					//Give it to the scope, removing any other buffer we might have
-					auto status = ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)i, waveformBuffers[i],
+					status = ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)i, waveformBuffers[i],
 						g_captureMemDepth, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_ADD);
 					if(status != PICO_OK)
-						LogFatal("ps6000aSetDataBuffer failed (code %d)\n", status);
+						LogFatal("ps6000aSetDataBuffer failed (code 0x%x)\n", status);
 				}
 
 				g_memDepthChanged = false;
@@ -105,9 +109,9 @@ void WaveformServerThread()
 			//Download the data from the scope
 			numSamples = g_captureMemDepth;
 			int16_t overflow = 0;
-			auto status = ps6000aGetValues(g_hScope, 0, &numSamples, 1, PICO_RATIO_MODE_RAW, 0, &overflow);
+			status = ps6000aGetValues(g_hScope, 0, &numSamples, 1, PICO_RATIO_MODE_RAW, 0, &overflow);
 			if(PICO_OK != status)
-				LogFatal("ps6000aGetValues (code %d)\n", status);
+				LogFatal("ps6000aGetValues (code 0x%x)\n", status);
 
 			//Figure out how many channels are active in this capture
 			numchans = 0;
@@ -157,15 +161,7 @@ void WaveformServerThread()
 			g_sampleIntervalDuringArm = g_sampleInterval;
 
 			//Restart
-			auto status = ps6000aRunBlock(g_hScope, g_captureMemDepth/2, g_captureMemDepth/2,
-				g_timebase, NULL, 0, NULL, NULL);
-			if(status == PICO_HARDWARE_CAPTURING_CALL_STOP)
-			{
-				//A start command was received from the socket thread.
-				//No need to start again
-			}
-			else if(status != PICO_OK)
-				LogFatal("ps6000aRunBlock in WaveformServerThread failed, code %d\n", status);
+			StartCapture(false);
 		}
 	}
 

@@ -75,4 +75,6 @@ extern bool g_memDepthChanged;
 
 extern std::mutex g_mutex;
 
+void StartCapture(bool stopFirst);
+
 #endif
