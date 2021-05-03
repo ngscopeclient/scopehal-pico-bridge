@@ -116,6 +116,7 @@ int64_t g_sampleInterval = 0;	//in fs
 map<size_t, bool> g_channelOnDuringArm;
 int64_t g_sampleIntervalDuringArm = 0;
 size_t g_captureMemDepth = 0;
+map<size_t, double> g_offsetDuringArm;
 
 uint32_t g_timebase = 0;
 
@@ -322,7 +323,17 @@ void ScpiServerThread()
 			else if( (cmd == "OFFS") && (args.size() == 1) )
 			{
 				lock_guard<mutex> lock(g_mutex);
-				g_offset[channelId] = stod(args[0]);
+
+				double requestedOffset = stod(args[0]);
+
+				//Clamp to allowed range
+				double maxoff;
+				double minoff;
+				ps6000aGetAnalogueOffsetLimits(g_hScope, g_range[channelId], g_coupling[channelId], &maxoff, &minoff);
+				requestedOffset = min(maxoff, requestedOffset);
+				requestedOffset = max(minoff, requestedOffset);
+
+				g_offset[channelId] = requestedOffset;
 				UpdateChannel(channelId);
 			}
 
@@ -406,7 +417,6 @@ void ScpiServerThread()
 					g_roundedRange[channelId] = 0.01;
 				}
 
-				//LogDebug("Requested %f V full-scale range. Got %f\n", range, g_roundedRange[channelId]);
 				UpdateChannel(channelId);
 
 				//Update trigger if this is the trigger channel.
@@ -467,10 +477,6 @@ void ScpiServerThread()
 
 				if(g_captureMemDepth != g_memDepth)
 					g_memDepthChanged = true;
-
-				g_channelOnDuringArm = g_channelOn;
-				g_captureMemDepth = g_memDepth;
-				g_sampleIntervalDuringArm = g_sampleInterval;
 
 				//Start the capture
 				StartCapture(false);
@@ -551,6 +557,10 @@ void ScpiServerThread()
 
 		LogVerbose("Client disconnected\n");
 
+		//Disable all channels when a client disconnects to put the scope in a "safe" state
+		for(auto it : g_channelOn)
+			ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)it.first);
+
 		g_waveformThreadQuit = true;
 		dataThread.join();
 		g_waveformThreadQuit = false;
@@ -629,14 +639,6 @@ void UpdateChannel(size_t chan)
 	{
 		ps6000aSetChannelOn(g_hScope, (PICO_CHANNEL)chan,
 			g_coupling[chan], g_range[chan], -g_offset[chan], g_bandwidth[chan]);
-
-		/*
-		//Get the min/max allowed offset
-		double maxoff;
-		double minoff;
-		ps6000aGetAnalogueOffsetLimits(g_hScope, g_range[chan], g_coupling[chan], &maxoff, &minoff);
-		LogDebug("maxoff = %f, minoff = %f\n", maxoff, minoff);
-		*/
 	}
 	else
 		ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)chan);
@@ -652,7 +654,7 @@ void UpdateTrigger()
 	float scale = g_roundedRange[g_triggerChannel] / 32512;
 	if(scale == 0)
 		scale = 1;
-	float trig_code = (g_triggerVoltage - offset) / scale;
+	float trig_code = (g_triggerVoltage + offset) / scale;
 	//LogDebug("UpdateTrigger: trig_code = %.0f for %f V, scale=%f\n", round(trig_code), g_triggerVoltage, scale);
 
 	//TODO: Convert delay from fs to native units (samples? ps?)
@@ -673,6 +675,11 @@ void UpdateTrigger()
 
 void StartCapture(bool stopFirst)
 {
+	g_offsetDuringArm = g_offset;
+	g_channelOnDuringArm = g_channelOn;
+	g_captureMemDepth = g_memDepth;
+	g_sampleIntervalDuringArm = g_sampleInterval;
+
 	if(stopFirst)
 		ps6000aStop(g_hScope);
 

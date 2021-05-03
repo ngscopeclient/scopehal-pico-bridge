@@ -68,6 +68,7 @@ extern std::map<size_t, double> g_roundedRange;
 extern uint32_t g_timebase;
 extern int64_t g_sampleInterval;
 extern int64_t g_sampleIntervalDuringArm;
+extern std::map<size_t, double> g_offsetDuringArm;
 
 extern bool g_triggerArmed;
 extern bool g_triggerOneShot;

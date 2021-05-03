@@ -135,11 +135,13 @@ void WaveformServerThread()
 		{
 			if(g_channelOnDuringArm[i])
 			{
-				//Send channel ID, scale, and memory depth
+				//Send channel ID, scale, offset, and memory depth
 				client.SendLooped((uint8_t*)&i, sizeof(i));
 				client.SendLooped((uint8_t*)&numSamples, sizeof(numSamples));
 				float scale = g_roundedRange[i] / 32512;
 				client.SendLooped((uint8_t*)&scale, sizeof(scale));
+				float offset = g_offsetDuringArm[i];
+				client.SendLooped((uint8_t*)&offset, sizeof(offset));
 
 				//Send the actual waveform data
 				client.SendLooped((uint8_t*)waveformBuffers[i], g_captureMemDepth * sizeof(uint16_t));
@@ -155,10 +157,6 @@ void WaveformServerThread()
 
 			if(g_captureMemDepth != g_memDepth)
 				g_memDepthChanged = true;
-
-			g_channelOnDuringArm = g_channelOn;
-			g_captureMemDepth = g_memDepth;
-			g_sampleIntervalDuringArm = g_sampleInterval;
 
 			//Restart
 			StartCapture(false);
