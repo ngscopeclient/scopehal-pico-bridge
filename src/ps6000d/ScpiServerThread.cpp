@@ -639,6 +639,12 @@ void UpdateChannel(size_t chan)
 	{
 		ps6000aSetChannelOn(g_hScope, (PICO_CHANNEL)chan,
 			g_coupling[chan], g_range[chan], -g_offset[chan], g_bandwidth[chan]);
+
+		//We use software triggering based on raw ADC codes.
+		//Any time we change the frontend configuration on the trigger channel, it has to be reconfigured.
+		//TODO: handle multi-input triggers
+		if(chan == g_triggerChannel)
+			UpdateTrigger();
 	}
 	else
 		ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)chan);
@@ -654,7 +660,7 @@ void UpdateTrigger()
 	float scale = g_roundedRange[g_triggerChannel] / 32512;
 	if(scale == 0)
 		scale = 1;
-	float trig_code = (g_triggerVoltage + offset) / scale;
+	float trig_code = (g_triggerVoltage - offset) / scale;
 	//LogDebug("UpdateTrigger: trig_code = %.0f for %f V, scale=%f\n", round(trig_code), g_triggerVoltage, scale);
 
 	//TODO: Convert delay from fs to native units (samples? ps?)
