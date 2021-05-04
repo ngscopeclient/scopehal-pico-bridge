@@ -38,6 +38,7 @@
 using namespace std;
 
 volatile bool g_waveformThreadQuit = false;
+float InterpolateTriggerTime(int16_t* buf);
 
 void WaveformServerThread()
 {
@@ -130,6 +131,9 @@ void WaveformServerThread()
 
 		//TODO: send overflow flags to client
 
+		//Interpolate trigger position if we're using a simple level trigger
+		float trigphase = InterpolateTriggerTime(waveformBuffers[g_triggerChannel]);
+
 		//Send data for each channel to the client
 		for(size_t i=0; i<g_numChannels; i++)
 		{
@@ -139,12 +143,12 @@ void WaveformServerThread()
 				client.SendLooped((uint8_t*)&i, sizeof(i));
 				client.SendLooped((uint8_t*)&numSamples, sizeof(numSamples));
 				float scale = g_roundedRange[i] / 32512;
-				client.SendLooped((uint8_t*)&scale, sizeof(scale));
 				float offset = g_offsetDuringArm[i];
-				client.SendLooped((uint8_t*)&offset, sizeof(offset));
+				float config[3] = {scale, offset, trigphase};
+				client.SendLooped((uint8_t*)&config, sizeof(config));
 
 				//Send the actual waveform data
-				client.SendLooped((uint8_t*)waveformBuffers[i], g_captureMemDepth * sizeof(uint16_t));
+				client.SendLooped((uint8_t*)waveformBuffers[i], g_captureMemDepth * sizeof(int16_t));
 			}
 		}
 
@@ -166,4 +170,18 @@ void WaveformServerThread()
 	//Clean up temporary buffers
 	for(auto it : waveformBuffers)
 		delete[] it.second;
+}
+
+float InterpolateTriggerTime(int16_t* buf)
+{
+	float trigscale = g_roundedRange[g_triggerChannel] / 32512;
+	float trigoff = g_offsetDuringArm[g_triggerChannel];
+
+	float fa = buf[g_triggerSampleIndex-1] * trigscale + trigoff;
+	float fb = buf[g_triggerSampleIndex] * trigscale + trigoff;
+
+	//no need to divide by time, sample spacing is normalized to 1 timebase unit
+	float slope = (fb - fa);
+	float delta = g_triggerVoltage - fa;
+	return delta / slope;
 }

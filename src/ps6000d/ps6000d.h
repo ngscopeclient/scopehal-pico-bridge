@@ -70,6 +70,10 @@ extern int64_t g_sampleInterval;
 extern int64_t g_sampleIntervalDuringArm;
 extern std::map<size_t, double> g_offsetDuringArm;
 
+extern size_t g_triggerSampleIndex;
+extern size_t g_triggerChannel;
+extern float g_triggerVoltage;
+
 extern bool g_triggerArmed;
 extern bool g_triggerOneShot;
 extern bool g_memDepthChanged;

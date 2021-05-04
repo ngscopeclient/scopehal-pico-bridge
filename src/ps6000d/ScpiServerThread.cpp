@@ -129,6 +129,7 @@ uint64_t g_triggerDelay = 0;
 PICO_THRESHOLD_DIRECTION g_triggerDirection = PICO_RISING;
 float g_triggerVoltage = 0;
 size_t g_triggerChannel = 0;
+size_t g_triggerSampleIndex;
 
 void UpdateTrigger();
 void UpdateChannel(size_t chan);
@@ -685,6 +686,7 @@ void StartCapture(bool stopFirst)
 	g_channelOnDuringArm = g_channelOn;
 	g_captureMemDepth = g_memDepth;
 	g_sampleIntervalDuringArm = g_sampleInterval;
+	g_triggerSampleIndex = g_memDepth/2;
 
 	if(stopFirst)
 		ps6000aStop(g_hScope);
