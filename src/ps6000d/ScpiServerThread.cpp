@@ -55,6 +55,9 @@
 		[chan]:RANGE [num]
 			Sets channel full-scale range to num volts
 
+		BITS [num]
+			Sets ADC bit depth
+
 		DEPTH [num]
 			Sets memory depth
 
@@ -227,7 +230,7 @@ void ScpiServerThread()
 				else if(cmd == "CHANS")
 					ScpiSend(client, to_string(g_numChannels));
 
-				//Get memory depth
+				//Get legal sample rates for the current configuration
 				else if(cmd == "RATES")
 				{
 					string ret = "";
@@ -306,6 +309,39 @@ void ScpiServerThread()
 				lock_guard<mutex> lock(g_mutex);
 				g_channelOn[channelId] = false;
 				UpdateChannel(channelId);
+			}
+
+			else if( (cmd == "BITS") && (args.size() == 1) )
+			{
+				lock_guard<mutex> lock(g_mutex);
+
+				ps6000aStop(g_hScope);
+
+				//Even though we didn't actually change memory, apparently calling ps6000aSetDeviceResolution
+				//will invalidate the existing buffers and make ps6000aGetValues() fail with PICO_BUFFERS_NOT_SET.
+				g_memDepthChanged = true;
+
+				int bits = stoi(args[0].c_str());
+				switch(bits)
+				{
+					case 8:
+						ps6000aSetDeviceResolution(g_hScope, PICO_DR_8BIT);
+						break;
+
+					case 10:
+						ps6000aSetDeviceResolution(g_hScope, PICO_DR_10BIT);
+						break;
+
+					case 12:
+						ps6000aSetDeviceResolution(g_hScope, PICO_DR_12BIT);
+						break;
+
+					default:
+						LogError("User requested invalid resolution (%d bits)\n", bits);
+				}
+
+				if(g_triggerArmed)
+					StartCapture(false);
 			}
 
 			else if( (cmd == "COUP") && (args.size() == 1) )
@@ -687,6 +723,8 @@ void StartCapture(bool stopFirst)
 	g_captureMemDepth = g_memDepth;
 	g_sampleIntervalDuringArm = g_sampleInterval;
 	g_triggerSampleIndex = g_memDepth/2;
+
+	//TODO: implement g_triggerDelay
 
 	if(stopFirst)
 		ps6000aStop(g_hScope);
