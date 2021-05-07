@@ -20,5 +20,6 @@ add_executable(ps6000d
 target_link_libraries(ps6000d
 	xptools
 	log
+	/opt/picoscope/lib/libps3000a.so
 	/opt/picoscope/lib/libps6000a.so
 	)

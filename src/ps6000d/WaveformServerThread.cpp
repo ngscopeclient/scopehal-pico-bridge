@@ -54,13 +54,17 @@ void WaveformServerThread()
 	map<size_t, int16_t*> waveformBuffers;
 
 	size_t numSamples = 0;
+	uint32_t numSamples_int = 0;
 	uint16_t numchans;
 	while(!g_waveformThreadQuit)
 	{
 		int16_t ready;
 		{
 			lock_guard<mutex> lock(g_mutex);
-			ps6000aIsReady(g_hScope, &ready);
+			if(g_pico_type == PICO6000A)
+				ps6000aIsReady(g_hScope, &ready);
+			else if(g_pico_type == PICO3000A)
+				ps3000aIsReady(g_hScope, &ready);
 		}
 
 		if( (ready == 0) || (!g_triggerArmed) )
@@ -73,7 +77,12 @@ void WaveformServerThread()
 			lock_guard<mutex> lock(g_mutex);
 
 			//Stop the trigger
-			auto status = ps6000aStop(g_hScope);
+			PICO_STATUS status;
+
+			if(g_pico_type == PICO6000A)
+				status = ps6000aStop(g_hScope);
+			else if(g_pico_type == PICO3000A)
+				status = ps3000aStop(g_hScope);
 			if(PICO_OK != status)
 				LogFatal("ps6000aStop failed (code 0x%x)\n", status);
 
@@ -86,8 +95,12 @@ void WaveformServerThread()
 
 				for(size_t i=0; i<g_numChannels; i++)
 				{
-					ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)i, NULL,
-						0, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_CLEAR_ALL);
+					if(g_pico_type == PICO6000A)
+						ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)i, NULL,
+							0, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_CLEAR_ALL);
+					else if(g_pico_type == PICO3000A)
+						ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)i, NULL,
+							0, 0, PS3000A_RATIO_MODE_NONE);
 				}
 				for(size_t i=0; i<g_numChannels; i++)
 				{
@@ -98,8 +111,12 @@ void WaveformServerThread()
 					memset(waveformBuffers[i], 0x00, g_captureMemDepth * sizeof(int16_t));
 
 					//Give it to the scope, removing any other buffer we might have
-					status = ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)i, waveformBuffers[i],
-						g_captureMemDepth, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_ADD);
+					if(g_pico_type == PICO6000A)
+						status = ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)i, waveformBuffers[i],
+							g_captureMemDepth, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_ADD);
+					else if(g_pico_type == PICO3000A)
+						status = ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)i, waveformBuffers[i],
+							g_captureMemDepth, 0, PS3000A_RATIO_MODE_NONE);
 					if(status != PICO_OK)
 						LogFatal("ps6000aSetDataBuffer failed (code 0x%x)\n", status);
 				}
@@ -109,8 +126,14 @@ void WaveformServerThread()
 
 			//Download the data from the scope
 			numSamples = g_captureMemDepth;
+			numSamples_int = g_captureMemDepth;
 			int16_t overflow = 0;
-			status = ps6000aGetValues(g_hScope, 0, &numSamples, 1, PICO_RATIO_MODE_RAW, 0, &overflow);
+			if(g_pico_type == PICO6000A)
+				status = ps6000aGetValues(g_hScope, 0, &numSamples, 1, PICO_RATIO_MODE_RAW, 0, &overflow);
+			else if(g_pico_type == PICO3000A)
+				status = ps3000aGetValues(g_hScope, 0, &numSamples_int, 1, PS3000A_RATIO_MODE_NONE, 0, &overflow);
+			if(status == PICO_NO_SAMPLES_AVAILABLE)
+				continue; // state changed while mutex was unlocked?
 			if(PICO_OK != status)
 				LogFatal("ps6000aGetValues (code 0x%x)\n", status);
 

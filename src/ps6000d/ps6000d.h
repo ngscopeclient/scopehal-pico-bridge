@@ -41,9 +41,16 @@
 #include <map>
 #include <mutex>
 
+#include "/opt/picoscope/include/libps3000a/ps3000aApi.h"
 #include "/opt/picoscope/include/libps6000a/ps6000aApi.h"
 #include "/opt/picoscope/include/libps6000a/PicoStatus.h"
 #include "/opt/picoscope/include/libps6000a/PicoVersion.h"
+
+enum PicoScopeType
+{
+	PICO3000A,
+	PICO6000A
+};
 
 extern Socket g_scpiSocket;
 extern Socket g_dataSocket;
@@ -52,6 +59,7 @@ extern int16_t g_hScope;
 void ScpiServerThread();
 void WaveformServerThread();
 
+extern PicoScopeType g_pico_type;
 extern std::string g_model;
 extern std::string g_serial;
 extern std::string g_fwver;
