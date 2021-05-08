@@ -40,6 +40,9 @@
 		CHANS?
 			Returns the number of channels on the instrument.
 
+		[1|2]D:PRESENT?
+			Returns 1 = MSO pod present, 0 = MSO pod not present
+
 		[chan]:COUP [DC1M|AC1M|DC50]
 			Sets channel coupling
 
@@ -134,6 +137,11 @@ float g_triggerVoltage = 0;
 size_t g_triggerChannel = 0;
 size_t g_triggerSampleIndex;
 
+//Thresholds for MSO pods
+int16_t g_msoPodThreshold[2][8] = { {0}, {0} };
+PICO_DIGITAL_PORT_HYSTERESIS g_msoHysteresis[2] = {PICO_NORMAL_100MV, PICO_NORMAL_100MV};
+bool g_msoPodEnabled[2] = {false};
+
 void UpdateTrigger();
 void UpdateChannel(size_t chan);
 
@@ -217,8 +225,18 @@ void ScpiServerThread()
 			ParseScpiLine(line, subject, cmd, query, args);
 
 			//Extract channel ID from subject and clamp bounds
-			size_t channelId = subject[0] - 'A';
-			channelId = min(channelId, g_numChannels);
+			size_t channelId = 0;
+			bool channelIsDigital = false;
+			if(isalpha(subject[0]))
+			{
+				channelId = min(static_cast<size_t>(subject[0] - 'A'), g_numChannels);
+				channelIsDigital = false;
+			}
+			else if(isdigit(subject[0]))
+			{
+				channelId = min(subject[0] - '0', 2) - 1;
+				channelIsDigital = true;
+			}
 
 			if(query)
 			{
@@ -291,6 +309,33 @@ void ScpiServerThread()
 					ScpiSend(client, ret);
 				}
 
+				else if(cmd == "PRESENT")
+				{
+					lock_guard<mutex> lock(g_mutex);
+
+					//There's no API to test for presence of a MSO pod without trying to enable it.
+					//If no pod is present, this call will return PICO_NO_MSO_POD_CONNECTED.
+					PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
+					auto status = ps6000aSetDigitalPortOn(
+						g_hScope,
+						podId,
+						g_msoPodThreshold[channelId],
+						8,
+						g_msoHysteresis[channelId]);
+
+					if(status == PICO_NO_MSO_POD_CONNECTED)
+						ScpiSend(client, "0");
+
+					//The pod is here. If we don't need it on, shut it back off
+					else
+					{
+						if(!g_msoPodEnabled[channelId])
+							ps6000aSetDigitalPortOff(g_hScope, podId);
+
+						ScpiSend(client, "1");
+					}
+				}
+
 				else
 					LogDebug("Unrecognized query received: %s\n", line.c_str());
 			}
@@ -301,14 +346,31 @@ void ScpiServerThread()
 			else if(cmd == "ON")
 			{
 				lock_guard<mutex> lock(g_mutex);
-				g_channelOn[channelId] = true;
-				UpdateChannel(channelId);
+
+				if(channelIsDigital)
+				{
+					LogDebug("Enabling MSO pod %zu\n", channelId);
+				}
+				else
+				{
+					g_channelOn[channelId] = true;
+					UpdateChannel(channelId);
+				}
+
 			}
 			else if(cmd == "OFF")
 			{
 				lock_guard<mutex> lock(g_mutex);
-				g_channelOn[channelId] = false;
-				UpdateChannel(channelId);
+
+				if(channelIsDigital)
+				{
+					LogDebug("Disabling MSO pod %zu\n", channelId);
+				}
+				else
+				{
+					g_channelOn[channelId] = false;
+					UpdateChannel(channelId);
+				}
 			}
 
 			else if( (cmd == "BITS") && (args.size() == 1) )
@@ -597,6 +659,11 @@ void ScpiServerThread()
 		//Disable all channels when a client disconnects to put the scope in a "safe" state
 		for(auto it : g_channelOn)
 			ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)it.first);
+		for(int i=0; i<2; i++)
+		{
+			ps6000aSetDigitalPortOff(g_hScope, (PICO_CHANNEL)(PICO_PORT0 + i));
+			g_msoPodEnabled[i] = false;
+		}
 
 		g_waveformThreadQuit = true;
 		dataThread.join();
