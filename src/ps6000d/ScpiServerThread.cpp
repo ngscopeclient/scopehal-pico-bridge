@@ -349,7 +349,17 @@ void ScpiServerThread()
 
 				if(channelIsDigital)
 				{
-					LogDebug("Enabling MSO pod %zu\n", channelId);
+					PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
+					auto status = ps6000aSetDigitalPortOn(
+						g_hScope,
+						podId,
+						g_msoPodThreshold[channelId],
+						8,
+						g_msoHysteresis[channelId]);
+					if(status != PICO_OK)
+						LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
+					else
+						g_msoPodEnabled[channelId] = true;
 				}
 				else
 				{
@@ -364,7 +374,10 @@ void ScpiServerThread()
 
 				if(channelIsDigital)
 				{
-					LogDebug("Disabling MSO pod %zu\n", channelId);
+					PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
+					auto status = ps6000aSetDigitalPortOff(g_hScope, podId);
+					if(status != PICO_OK)
+						LogError("ps6000aSetDigitalPortOff failed with code %x\n", status);
 				}
 				else
 				{
