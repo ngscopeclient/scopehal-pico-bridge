@@ -148,7 +148,7 @@ void WaveformServerThread()
 				client.SendLooped((uint8_t*)&config, sizeof(config));
 
 				//Send the actual waveform data
-				client.SendLooped((uint8_t*)waveformBuffers[i], g_captureMemDepth * sizeof(int16_t));
+				client.SendLooped((uint8_t*)waveformBuffers[i], numSamples * sizeof(int16_t));
 			}
 		}
 
