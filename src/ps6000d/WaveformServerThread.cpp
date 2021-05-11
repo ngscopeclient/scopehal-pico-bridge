@@ -69,7 +69,7 @@ void WaveformServerThread()
 
 		if( (ready == 0) || (!g_triggerArmed) )
 		{
-			usleep(1000);
+			std::this_thread::sleep_for(std::chrono::microseconds(1000));
 			continue;
 		}
 
