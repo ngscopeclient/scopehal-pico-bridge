@@ -1,25 +1,50 @@
-# Additional libraries on Windows
+
 if(WIN32)
+	# Windows additional options, libraries and default path (Picoscope SDK 64bits)
+	# Use MinGW formatting (C *printf Format "%zu"...) rather than MSVCRT for C99 support.
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D__USE_MINGW_ANSI_STDIO=1")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__USE_MINGW_ANSI_STDIO=1")
 	set(WIN_LIBS shlwapi)
-	endif()
+	set(PICO_SDK_PATH "C:/Program Files/Pico Technology/SDK")
+else()
+	# Linux specific Picoscope SDK Path
+	set(PICO_SDK_PATH "/opt/picoscope")
+endif()
 
 #Set up include paths
-include_directories('/opt/picoscope/include/')
+if(WIN32)
+	# Windows specific include path
+	include_directories(${PICO_SDK_PATH}/inc/)
+else()
+	# Linux specific include path
+	include_directories(${PICO_SDK_PATH}/include/)
+endif()
 
 ###############################################################################
 #C++ compilation
 add_executable(ps6000d
 	ScpiServerThread.cpp
 	WaveformServerThread.cpp
-
 	main.cpp
 )
 
 ###############################################################################
 #Linker settings
-target_link_libraries(ps6000d
+if(WIN32)
+	# Windows specific linker
+	target_link_libraries(ps6000d
 	xptools
 	log
-	/opt/picoscope/lib/libps3000a.so
-	/opt/picoscope/lib/libps6000a.so
+	${PICO_SDK_PATH}/lib/ps3000a.lib
+	${PICO_SDK_PATH}/lib/ps6000a.lib
 	)
+else()
+	# Linux specific linker
+	target_link_libraries(ps6000d
+	xptools
+	log
+	${PICO_SDK_PATH}/lib/libps3000a.so
+	${PICO_SDK_PATH}/lib/libps6000a.so
+	)
+endif()
+

@@ -30,21 +30,22 @@
 #ifndef ps6000d_h
 #define ps6000d_h
 
+#include "../../lib/log/log.h"
+#include "../../lib/xptools/Socket.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #include <shlwapi.h>
 #endif
 
-#include "../../lib/log/log.h"
-#include "../../lib/xptools/Socket.h"
 #include <thread>
 #include <map>
 #include <mutex>
 
-#include "/opt/picoscope/include/libps3000a/ps3000aApi.h"
-#include "/opt/picoscope/include/libps6000a/ps6000aApi.h"
-#include "/opt/picoscope/include/libps6000a/PicoStatus.h"
-#include "/opt/picoscope/include/libps6000a/PicoVersion.h"
+#include "ps3000aApi.h"
+#include "ps6000aApi.h"
+#include "PicoStatus.h"
+#include "PicoVersion.h"
 
 enum PicoScopeType
 {
