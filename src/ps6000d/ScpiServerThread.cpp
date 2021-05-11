@@ -276,7 +276,7 @@ void ScpiServerThread()
 						size_t maxSamples;
 						int32_t maxSamples_int;
 						PICO_STATUS status;
-
+						status = PICO_RESERVED_1;
 						if(g_pico_type == PICO6000A)
 							status = ps6000aGetTimebase(g_hScope, i, 1, &intervalNs, &maxSamples, 0);
 						else if(g_pico_type == PICO3000A)
@@ -309,7 +309,7 @@ void ScpiServerThread()
 					int32_t maxSamples_int;
 
 					PICO_STATUS status;
-
+					status = PICO_RESERVED_1;
 					//Ask for max memory depth at 1.25 Gsps. Why does legal memory depend on sample rate?
 					if(g_pico_type == PICO6000A)
 						status = ps6000aGetTimebase(g_hScope, 2, 1, &intervalNs, &maxSamples, 0);
@@ -910,9 +910,10 @@ void StartCapture(bool stopFirst)
 
 	//TODO: implement g_triggerDelay
 
-	LogVerbose("StartCapture stopFirst %d memdepth %d\n", stopFirst, g_memDepth);
+	LogVerbose("StartCapture stopFirst %d memdepth %zu\n", stopFirst, g_memDepth);
 
 	PICO_STATUS status;
+	status = PICO_RESERVED_1;
 	switch(g_pico_type)
 	{
 	case PICO3000A:
