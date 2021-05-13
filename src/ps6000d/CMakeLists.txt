@@ -16,8 +16,9 @@ if(WIN32)
 	# Windows specific include path
 	include_directories(${PICO_SDK_PATH}/inc/)
 else()
-	# Linux specific include path
-	include_directories(${PICO_SDK_PATH}/include/)
+	# Linux specific include paths
+	include_directories(${PICO_SDK_PATH}/include/libps3000a)
+	include_directories(${PICO_SDK_PATH}/include/libps6000a)
 endif()
 
 ###############################################################################
