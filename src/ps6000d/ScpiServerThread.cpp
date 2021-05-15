@@ -121,9 +121,11 @@ void ParseScpiLine(const string& line, string& subject, string& cmd, bool& query
 map<size_t, bool> g_channelOn;
 map<size_t, PICO_COUPLING> g_coupling;
 map<size_t, PICO_CONNECT_PROBE_RANGE> g_range;
+map<size_t, enPS3000ARange> g_range_3000a;
 map<size_t, double> g_roundedRange;
 map<size_t, double> g_offset;
 map<size_t, PICO_BANDWIDTH_LIMITER> g_bandwidth;
+map<size_t, size_t> g_bandwidth_legacy;
 size_t g_memDepth = 1000000;
 int64_t g_sampleInterval = 0;	//in fs
 
@@ -199,8 +201,10 @@ void ScpiServerThread()
 		g_channelOn[i] = false;
 		g_coupling[i] = PICO_DC;
 		g_range[i] = PICO_X1_PROBE_1V;
+		g_range_3000a[i] = PS3000A_1V;
 		g_offset[i] = 0;
 		g_bandwidth[i] = PICO_BW_FULL;
+		g_bandwidth_legacy[i] = PS3000A_BW_FULL;
 	}
 
 	//TODO: detect this somehow
@@ -244,6 +248,7 @@ void ScpiServerThread()
 			if(!ScpiRecv(client, line))
 				break;
 			ParseScpiLine(line, subject, cmd, query, args);
+			LogVerbose((line + "\n").c_str());
 
 			//Extract channel ID from subject and clamp bounds
 			size_t channelId = 0;
@@ -291,12 +296,27 @@ void ScpiServerThread()
 					for(auto i : vec)
 					{
 						double intervalNs;
+						int32_t intervalNs_int;
 						size_t maxSamples;
-						if(PICO_OK == ps6000aGetTimebase(g_hScope, i, 1, &intervalNs, &maxSamples, 0))
+						int32_t maxSamples_int;
+						PICO_STATUS status;
+						status = PICO_RESERVED_1;
+						if(g_pico_type == PICO6000A)
+							status = ps6000aGetTimebase(g_hScope, i, 1, &intervalNs, &maxSamples, 0);
+						else if(g_pico_type == PICO3000A)
+						{
+							status = ps3000aGetTimebase(g_hScope, i, 1, &intervalNs_int, 0, &maxSamples_int, 0);
+							intervalNs = intervalNs_int;
+							maxSamples = maxSamples_int;
+						}
+
+						if(PICO_OK == status)
 						{
 							size_t intervalFs = intervalNs * 1e6f;
 							ret += to_string(intervalFs) + ",";
 						}
+						else
+							LogWarning("GetTimebase failed, code %d / 0x%x\n", status, status);
 					}
 					ScpiSend(client, ret);
 				}
@@ -308,10 +328,19 @@ void ScpiServerThread()
 
 					lock_guard<mutex> lock(g_mutex);
 					double intervalNs;
+					int32_t intervalNs_int;
 					size_t maxSamples;
+					int32_t maxSamples_int;
 
+					PICO_STATUS status;
+					status = PICO_RESERVED_1;
 					//Ask for max memory depth at 1.25 Gsps. Why does legal memory depend on sample rate?
-					if(PICO_OK == ps6000aGetTimebase(g_hScope, 2, 1, &intervalNs, &maxSamples, 0))
+					if(g_pico_type == PICO6000A)
+						status = ps6000aGetTimebase(g_hScope, 2, 1, &intervalNs, &maxSamples, 0);
+					else if(g_pico_type == PICO3000A)
+						status = ps3000aGetTimebase(g_hScope, 2, 1, &intervalNs_int, 0, &maxSamples_int, 0);
+
+					if(PICO_OK == status)
 					{
 						//Seems like there's no restrictions on actual memory depth other than an upper bound.
 						//To keep things simple, report 1-2-5 series from 10K samples up to the actual max depth
@@ -414,6 +443,9 @@ void ScpiServerThread()
 			{
 				lock_guard<mutex> lock(g_mutex);
 
+				if(g_pico_type != PICO6000A)
+					continue;
+
 				ps6000aStop(g_hScope);
 
 				//Even though we didn't actually change memory, apparently calling ps6000aSetDeviceResolution
@@ -495,10 +527,22 @@ void ScpiServerThread()
 
 				double requestedOffset = stod(args[0]);
 
-				//Clamp to allowed range
 				double maxoff;
 				double minoff;
-				ps6000aGetAnalogueOffsetLimits(g_hScope, g_range[channelId], g_coupling[channelId], &maxoff, &minoff);
+				float maxoff_f;
+				float minoff_f;
+
+				//Clamp to allowed range
+				switch(g_pico_type) {
+				case PICO3000A:
+					ps3000aGetAnalogueOffset(g_hScope, g_range_3000a[channelId], (PS3000A_COUPLING)g_coupling[channelId], &maxoff_f, &minoff_f);
+					maxoff = maxoff_f;
+					minoff = minoff_f;
+					break;
+				case PICO6000A:
+					ps6000aGetAnalogueOffsetLimits(g_hScope, g_range[channelId], g_coupling[channelId], &maxoff, &minoff);
+					break;
+				}
 				requestedOffset = min(maxoff, requestedOffset);
 				requestedOffset = max(minoff, requestedOffset);
 
@@ -515,12 +559,12 @@ void ScpiServerThread()
 				if(g_coupling[channelId] == PICO_DC_50OHM)
 					range = min(range, 5.0);
 
-				if(range > 100)
+				if(range > 100 && g_pico_type == PICO6000A)
 				{
 					g_range[channelId] = PICO_X1_PROBE_200V;
 					g_roundedRange[channelId] = 200;
 				}
-				else if(range > 50)
+				else if(range > 50 && g_pico_type == PICO6000A)
 				{
 					g_range[channelId] = PICO_X1_PROBE_100V;
 					g_roundedRange[channelId] = 100;
@@ -528,61 +572,73 @@ void ScpiServerThread()
 				else if(range > 20)
 				{
 					g_range[channelId] = PICO_X1_PROBE_50V;
+					g_range_3000a[channelId] = PS3000A_50V;
 					g_roundedRange[channelId] = 50;
 				}
 				else if(range > 10)
 				{
 					g_range[channelId] = PICO_X1_PROBE_20V;
+					g_range_3000a[channelId] = PS3000A_20V;
 					g_roundedRange[channelId] = 20;
 				}
 				else if(range > 5)
 				{
 					g_range[channelId] = PICO_X1_PROBE_10V;
+					g_range_3000a[channelId] = PS3000A_10V;
 					g_roundedRange[channelId] = 10;
 				}
 				else if(range > 2)
 				{
 					g_range[channelId] = PICO_X1_PROBE_5V;
+					g_range_3000a[channelId] = PS3000A_5V;
 					g_roundedRange[channelId] = 5;
 				}
 				else if(range > 1)
 				{
 					g_range[channelId] = PICO_X1_PROBE_2V;
+					g_range_3000a[channelId] = PS3000A_2V;
 					g_roundedRange[channelId] = 2;
 				}
 				else if(range > 0.5)
 				{
 					g_range[channelId] = PICO_X1_PROBE_1V;
+					g_range_3000a[channelId] = PS3000A_1V;
 					g_roundedRange[channelId] = 1;
 				}
 				else if(range > 0.2)
 				{
 					g_range[channelId] = PICO_X1_PROBE_500MV;
+					g_range_3000a[channelId] = PS3000A_500MV;
 					g_roundedRange[channelId] = 0.5;
 				}
 				else if(range > 0.1)
 				{
 					g_range[channelId] = PICO_X1_PROBE_200MV;
+					g_range_3000a[channelId] = PS3000A_200MV;
 					g_roundedRange[channelId] = 0.2;
 				}
 				else if(range >= 0.05)
 				{
 					g_range[channelId] = PICO_X1_PROBE_100MV;
+					g_range_3000a[channelId] = PS3000A_100MV;
 					g_roundedRange[channelId] = 0.1;
 				}
 				else if(range >= 0.02)
 				{
 					g_range[channelId] = PICO_X1_PROBE_50MV;
+					g_range_3000a[channelId] = PS3000A_50MV;
 					g_roundedRange[channelId] = 0.05;
 				}
 				else if(range >= 0.01)
 				{
 					g_range[channelId] = PICO_X1_PROBE_20MV;
+					g_range_3000a[channelId] = PS3000A_20MV;
 					g_roundedRange[channelId] = 0.02;
 				}
 				else
 				{
 					g_range[channelId] = PICO_X1_PROBE_10MV;
+					g_range_3000a[channelId] = PS3000A_10MV;
 					g_roundedRange[channelId] = 0.01;
 				}
 
@@ -684,7 +740,11 @@ void ScpiServerThread()
 			{
 				lock_guard<mutex> lock(g_mutex);
 
-				ps6000aStop(g_hScope);
+				if(g_pico_type == PICO3000A)
+					ps3000aStop(g_hScope);
+				else if(g_pico_type == PICO6000A)
+					ps6000aStop(g_hScope);
+
 				g_triggerArmed = false;
 			}
 
@@ -756,11 +816,24 @@ void ScpiServerThread()
 
 		//Disable all channels when a client disconnects to put the scope in a "safe" state
 		for(auto it : g_channelOn)
-			ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)it.first);
-		for(int i=0; i<2; i++)
 		{
-			ps6000aSetDigitalPortOff(g_hScope, (PICO_CHANNEL)(PICO_PORT0 + i));
-			g_msoPodEnabled[i] = false;
+			switch(g_pico_type)
+			{
+			case PICO3000A:
+				ps3000aSetChannel(g_hScope, (PS3000A_CHANNEL)it.first, 0, PS3000A_DC, PS3000A_1V, 0.0f);
+				break;
+			case PICO6000A:
+				ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)it.first);
+				break;
+			}
+		}
+		if(g_pico_type == PICO6000A)
+		{
+			for(int i=0; i<2; i++)
+			{
+				ps6000aSetDigitalPortOff(g_hScope, (PICO_CHANNEL)(PICO_PORT0 + i));
+				g_msoPodEnabled[i] = false;
+			}
 		}
 
 		g_waveformThreadQuit = true;
@@ -837,6 +910,17 @@ void ParseScpiLine(const string& line, string& subject, string& cmd, bool& query
  */
 void UpdateChannel(size_t chan)
 {
+	if(g_pico_type == PICO3000A)
+	{
+		ps3000aSetChannel(g_hScope, (PS3000A_CHANNEL)chan, g_channelOn[chan],
+			(PS3000A_COUPLING)g_coupling[chan], g_range_3000a[chan], -g_offset[chan]);
+		ps3000aSetBandwidthFilter(g_hScope, (PS3000A_CHANNEL)chan,
+			(PS3000A_BANDWIDTH_LIMITER)g_bandwidth_legacy[chan]);
+		if(chan == g_triggerChannel)
+			UpdateTrigger();
+		return;
+	}
+
 	if(g_channelOn[chan])
 	{
 		ps6000aSetChannelOn(g_hScope, (PICO_CHANNEL)chan,
@@ -868,14 +952,29 @@ void UpdateTrigger()
 	//TODO: Convert delay from fs to native units (samples? ps?)
 	uint64_t delay = 0;
 
-	ps6000aSetSimpleTrigger(
-		g_hScope,
-		1,
-		(PICO_CHANNEL)g_triggerChannel,
-		round(trig_code),
-		g_triggerDirection,
-		delay,
-		0);
+	switch(g_pico_type)
+	{
+	case PICO3000A:
+		ps3000aSetSimpleTrigger(
+			g_hScope,
+			1,
+			(PS3000A_CHANNEL)g_triggerChannel,
+			round(trig_code),
+			(enPS3000AThresholdDirection)g_triggerDirection, // same as 6000a api
+			delay,
+			0);
+		break;
+	case PICO6000A:
+		ps6000aSetSimpleTrigger(
+			g_hScope,
+			1,
+			(PICO_CHANNEL)g_triggerChannel,
+			round(trig_code),
+			g_triggerDirection,
+			delay,
+			0);
+		break;
+	}
 
 	if(g_triggerArmed)
 		StartCapture(true);
@@ -891,10 +990,24 @@ void StartCapture(bool stopFirst)
 
 	//TODO: implement g_triggerDelay
 
-	if(stopFirst)
-		ps6000aStop(g_hScope);
+	LogVerbose("StartCapture stopFirst %d memdepth %zu\n", stopFirst, g_memDepth);
 
-	auto status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
+	PICO_STATUS status;
+	status = PICO_RESERVED_1;
+	switch(g_pico_type)
+	{
+	case PICO3000A:
+		if(stopFirst)
+			ps3000aStop(g_hScope);
+		// TODO: why the 1
+		status = ps3000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, 1, NULL, 0, NULL, NULL);
+		break;
+	case PICO6000A:
+		if(stopFirst)
+			ps6000aStop(g_hScope);
+		status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
+		break;
+	}
 
 	//not sure why this happens...
 	if(status == PICO_HARDWARE_CAPTURING_CALL_STOP)

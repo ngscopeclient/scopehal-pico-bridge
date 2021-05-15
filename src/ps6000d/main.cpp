@@ -36,6 +36,8 @@
 #include "ps6000d.h"
 #include <signal.h>
 
+PICO_STATUS (*picoGetUnitInfo) (int16_t, int8_t *, int16_t, int16_t *, PICO_INFO);
+
 using namespace std;
 
 void help();
@@ -67,6 +69,7 @@ string g_model;
 string g_serial;
 string g_fwver;
 
+PicoScopeType g_pico_type;
 int16_t g_hScope = 0;
 size_t g_numChannels = 0;
 
@@ -125,8 +128,28 @@ int main(int argc, char* argv[])
 	auto status = ps6000aOpenUnit(&g_hScope, NULL, PICO_DR_8BIT);
 	if(PICO_OK != status)
 	{
-		LogError("Failed to open unit (code %d)\n", status);
-		return 1;
+		LogNotice("Looking for a PicoScope 3000 series instrument to open...\n");
+		status = ps3000aOpenUnit(&g_hScope, NULL);
+		if(status == PICO_POWER_SUPPLY_NOT_CONNECTED)
+		{
+			// switch to USB power
+			// TODO: maybe require the user to specify this is ok
+			LogNotice("Switching to USB power...\n");
+			status = ps3000aChangePowerSource(g_hScope, PICO_POWER_SUPPLY_NOT_CONNECTED);
+		}
+	        if(PICO_OK != status)
+		{
+			LogError("Failed to open unit (code %d)\n", status);
+			return 1;
+		}
+		else
+		{
+			g_pico_type = PICO3000A;
+			picoGetUnitInfo = ps3000aGetUnitInfo;
+		}
+	} else {
+		g_pico_type = PICO6000A;
+		picoGetUnitInfo = ps6000aGetUnitInfo;
 	}
 
 	//See what we got
@@ -136,80 +159,80 @@ int main(int argc, char* argv[])
 
 		char buf[128];
 		int16_t required = 0;
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_DRIVER_VERSION);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_DRIVER_VERSION);
 		if(status == PICO_OK)
 			LogVerbose("Driver version:   %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_USB_VERSION);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_USB_VERSION);
 		if(status == PICO_OK)
 			LogVerbose("USB version:      %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_HARDWARE_VERSION);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_HARDWARE_VERSION);
 		if(status == PICO_OK)
 			LogVerbose("Hardware version: %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_VARIANT_INFO);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_VARIANT_INFO);
 		if(status == PICO_OK)
 		{
 			LogVerbose("Variant info:     %s\n", buf);
 			g_model = buf;
 		}
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_BATCH_AND_SERIAL);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_BATCH_AND_SERIAL);
 		if(status == PICO_OK)
 		{
 			LogVerbose("Batch/serial:     %s\n", buf);
 			g_serial = buf;
 		}
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_CAL_DATE);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_CAL_DATE);
 		if(status == PICO_OK)
 			LogVerbose("Cal date:         %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_KERNEL_VERSION);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_KERNEL_VERSION);
 		if(status == PICO_OK)
 			LogVerbose("Kernel ver:       %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_DIGITAL_HARDWARE_VERSION);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_DIGITAL_HARDWARE_VERSION);
 		if(status == PICO_OK)
 			LogVerbose("Digital HW ver:   %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_ANALOGUE_HARDWARE_VERSION);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_ANALOGUE_HARDWARE_VERSION);
 		if(status == PICO_OK)
 			LogVerbose("Analog HW ver:    %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_FIRMWARE_VERSION_1);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_FIRMWARE_VERSION_1);
 		if(status == PICO_OK)
 		{
 			LogVerbose("FW ver 1:         %s\n", buf);
 			g_fwver = buf;
 		}
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_FIRMWARE_VERSION_2);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_FIRMWARE_VERSION_2);
 		if(status == PICO_OK)
 			LogVerbose("FW ver 2:         %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_FIRMWARE_VERSION_3);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_FIRMWARE_VERSION_3);
 		if(status == PICO_OK)
 			LogVerbose("FW ver 3:         %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_FRONT_PANEL_FIRMWARE_VERSION);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_FRONT_PANEL_FIRMWARE_VERSION);
 		if(status == PICO_OK)
 			LogVerbose("Front panel FW:   %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_MAC_ADDRESS);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_MAC_ADDRESS);
 		if(status == PICO_OK)
 			LogVerbose("MAC address:      %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_DRIVER_PATH);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_DRIVER_PATH);
 		if(status == PICO_OK)
 			LogVerbose("Driver path:      %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_SHADOW_CAL);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_SHADOW_CAL);
 		if(status == PICO_OK)
 			LogVerbose("Shadow cal:       %s\n", buf);
 
-		status = ps6000aGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_IPP_VERSION);
+		status = picoGetUnitInfo(g_hScope, (int8_t*)buf, sizeof(buf), &required, PICO_IPP_VERSION);
 		if(status == PICO_OK)
 			LogVerbose("IPP version:      %s\n", buf);
 	}
@@ -218,7 +241,17 @@ int main(int argc, char* argv[])
 
 	//Initial channel state setup
 	for(size_t i=0; i<g_numChannels; i++)
-		ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)i);
+	{
+		switch (g_pico_type)
+		{
+		case PICO3000A:
+			ps3000aSetChannel(g_hScope, (PS3000A_CHANNEL)i, 0, PS3000A_DC, PS3000A_1V, 0.0f);
+			break;
+		case PICO6000A:
+			ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)i);
+			break;
+		}
+	}
 
 	//Set up signal handlers
 	signal(SIGINT, OnQuit);

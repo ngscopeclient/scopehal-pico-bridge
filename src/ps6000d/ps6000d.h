@@ -30,20 +30,28 @@
 #ifndef ps6000d_h
 #define ps6000d_h
 
+#include "../../lib/log/log.h"
+#include "../../lib/xptools/Socket.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #include <shlwapi.h>
 #endif
 
-#include "../../lib/log/log.h"
-#include "../../lib/xptools/Socket.h"
 #include <thread>
 #include <map>
 #include <mutex>
 
-#include "/opt/picoscope/include/libps6000a/ps6000aApi.h"
-#include "/opt/picoscope/include/libps6000a/PicoStatus.h"
-#include "/opt/picoscope/include/libps6000a/PicoVersion.h"
+#include "ps3000aApi.h"
+#include "ps6000aApi.h"
+#include "PicoStatus.h"
+#include "PicoVersion.h"
+
+enum PicoScopeType
+{
+	PICO3000A,
+	PICO6000A
+};
 
 extern Socket g_scpiSocket;
 extern Socket g_dataSocket;
@@ -52,6 +60,7 @@ extern int16_t g_hScope;
 void ScpiServerThread();
 void WaveformServerThread();
 
+extern PicoScopeType g_pico_type;
 extern std::string g_model;
 extern std::string g_serial;
 extern std::string g_fwver;
