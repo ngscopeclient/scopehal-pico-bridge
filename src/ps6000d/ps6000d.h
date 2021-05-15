@@ -66,6 +66,7 @@ extern std::string g_serial;
 extern std::string g_fwver;
 
 extern size_t g_numChannels;
+extern size_t g_numDigitalPods;
 
 extern volatile bool g_waveformThreadQuit;
 extern size_t g_captureMemDepth;
