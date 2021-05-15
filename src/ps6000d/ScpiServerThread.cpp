@@ -46,6 +46,9 @@
 		[chan]:COUP [DC1M|AC1M|DC50]
 			Sets channel coupling
 
+		[chan]:HYS [mV]
+			Sets MSO channel hysteresis to mV millivolts
+
 		[chan]:OFF
 			Turns the channel off
 
@@ -57,6 +60,9 @@
 
 		[chan]:RANGE [num]
 			Sets channel full-scale range to num volts
+
+		[chan]:THRESH [mV]
+			Sets MSO channel threshold to mV millivolts
 
 		BITS [num]
 			Sets ADC bit depth
@@ -96,6 +102,9 @@
 
 		TRIG:SOU [chan]
 			Selects the channel as the trigger source
+
+
+		TODO: SetDigitalPortInteractionCallback to determine when pods are connected/removed
  */
 
 #include "ps6000d.h"
@@ -138,6 +147,7 @@ size_t g_triggerChannel = 0;
 size_t g_triggerSampleIndex;
 
 //Thresholds for MSO pods
+size_t g_numDigitalPods = 2;
 int16_t g_msoPodThreshold[2][8] = { {0}, {0} };
 PICO_DIGITAL_PORT_HYSTERESIS g_msoHysteresis[2] = {PICO_NORMAL_100MV, PICO_NORMAL_100MV};
 bool g_msoPodEnabled[2] = {false};
@@ -193,6 +203,17 @@ void ScpiServerThread()
 		g_bandwidth[i] = PICO_BW_FULL;
 	}
 
+	//TODO: detect this somehow
+	//For now, assume every scope has two MSO pods.
+	g_numDigitalPods = 2;
+	for(size_t i=0; i<g_numDigitalPods; i++)
+	{
+		g_msoPodEnabled[i] = false;
+		for(size_t j=0; j<8; j++)
+			g_msoPodThreshold[i][j] = 0;
+		g_msoHysteresis[i] = PICO_NORMAL_100MV;
+	}
+
 	//Push initial trigger config
 	{
 		lock_guard<mutex> lock(g_mutex);
@@ -226,6 +247,7 @@ void ScpiServerThread()
 
 			//Extract channel ID from subject and clamp bounds
 			size_t channelId = 0;
+			size_t laneId = 0;
 			bool channelIsDigital = false;
 			if(isalpha(subject[0]))
 			{
@@ -236,6 +258,8 @@ void ScpiServerThread()
 			{
 				channelId = min(subject[0] - '0', 2) - 1;
 				channelIsDigital = true;
+				if(subject.length() >= 3)
+					laneId = min(subject[2] - '0', 7);
 			}
 
 			if(query)
@@ -432,6 +456,39 @@ void ScpiServerThread()
 				UpdateChannel(channelId);
 			}
 
+			else if( (cmd == "HYS") && (args.size() == 1) )
+			{
+				lock_guard<mutex> lock(g_mutex);
+
+				//Calculate hysteresis
+				int level = stoi(args[0]);
+				if(level <= 50)
+					g_msoHysteresis[channelId] = PICO_LOW_50MV;
+				else if(level <= 100)
+					g_msoHysteresis[channelId] = PICO_NORMAL_100MV;
+				else if(level <= 200)
+					g_msoHysteresis[channelId] = PICO_HIGH_200MV;
+				else
+					g_msoHysteresis[channelId] = PICO_VERY_HIGH_400MV;
+
+				LogDebug("Setting MSO pod %zu hysteresis to %d mV (code %d)\n",
+					channelId, level, g_msoHysteresis[channelId]);
+
+				//Update the pod if currently active
+				if(g_msoPodEnabled[channelId])
+				{
+					PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
+					auto status = ps6000aSetDigitalPortOn(
+						g_hScope,
+						podId,
+						g_msoPodThreshold[channelId],
+						8,
+						g_msoHysteresis[channelId]);
+					if(status != PICO_OK)
+						LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
+				}
+			}
+
 			else if( (cmd == "OFFS") && (args.size() == 1) )
 			{
 				lock_guard<mutex> lock(g_mutex);
@@ -558,10 +615,38 @@ void ScpiServerThread()
 				g_timebase = timebase;
 			}
 
+			else if( (cmd == "THRESH") && (args.size() == 1) )
+			{
+				double level = stod(args[0]);
+				int16_t code = round( (level * 32767) / 5.0);
+				g_msoPodThreshold[channelId][laneId] = code;
+
+				LogDebug("Setting MSO pod %zu lane %zu threshold to %f (code %d)\n", channelId, laneId, level, code);
+
+				lock_guard<mutex> lock(g_mutex);
+
+				//Update the pod if currently active
+				if(g_msoPodEnabled[channelId])
+				{
+					PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
+					auto status = ps6000aSetDigitalPortOn(
+						g_hScope,
+						podId,
+						g_msoPodThreshold[channelId],
+						8,
+						g_msoHysteresis[channelId]);
+					if(status != PICO_OK)
+						LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
+				}
+			}
+
 			else if( (cmd == "DEPTH") && (args.size() == 1) )
 			{
 				lock_guard<mutex> lock(g_mutex);
 				g_memDepth = stoull(args[0]);
+
+				if(g_triggerArmed)
+					StartCapture(true);
 			}
 
 			else if( (cmd == "START") || (cmd == "SINGLE") )
