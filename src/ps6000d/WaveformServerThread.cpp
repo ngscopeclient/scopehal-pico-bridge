@@ -155,7 +155,7 @@ void WaveformServerThread()
 			}
 			for(size_t i=0; i<g_numDigitalPods; i++)
 			{
-				if(g_msoPodEnabled[i])
+				if(g_msoPodEnabledDuringArm[i])
 					numchans ++;
 			}
 		}
