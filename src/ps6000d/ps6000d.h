@@ -103,6 +103,7 @@ extern std::mutex g_mutex;
 
 void Stop();
 void StartCapture(bool stopFirst);
+PICO_STATUS StartInternal();
 void UpdateTrigger();
 void UpdateChannel(size_t chan);
 

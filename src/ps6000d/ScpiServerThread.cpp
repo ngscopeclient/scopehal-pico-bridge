@@ -973,6 +973,22 @@ void Stop()
 	}
 }
 
+PICO_STATUS StartInternal()
+{
+	switch(g_pico_type)
+	{
+		case PICO3000A:
+			// TODO: why the 1
+			return ps3000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, 1, NULL, 0, NULL, NULL);
+
+		case PICO6000A:
+			return ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
+
+		default:
+			return PICO_OK;
+	}
+}
+
 void StartCapture(bool stopFirst)
 {
 	g_offsetDuringArm = g_offset;
@@ -991,24 +1007,14 @@ void StartCapture(bool stopFirst)
 	status = PICO_RESERVED_1;
 	if(stopFirst)
 		Stop();
-	switch(g_pico_type)
-	{
-		case PICO3000A:
-			// TODO: why the 1
-			status = ps3000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, 1, NULL, 0, NULL, NULL);
-			break;
-
-		case PICO6000A:
-			status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
-			break;
-	}
+	status = StartInternal();
 
 	//not sure why this happens...
 	while(status == PICO_HARDWARE_CAPTURING_CALL_STOP)
 	{
 		LogWarning("Got PICO_HARDWARE_CAPTURING_CALL_STOP (but scope should have been stopped already)\n");
 		Stop();
-		status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
+		status = StartInternal();
 	}
 
 	if(status != PICO_OK)
