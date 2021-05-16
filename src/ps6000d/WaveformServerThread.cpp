@@ -192,7 +192,6 @@ void WaveformServerThread()
 			//Digital channels
 			else if( (i >= g_numChannels) && (g_msoPodEnabledDuringArm[i - g_numChannels]) )
 			{
-				LogDebug("Sending digital (chnum=%zu)\n", i);
 				client.SendLooped((uint8_t*)&i, sizeof(i));
 				client.SendLooped((uint8_t*)&numSamples, sizeof(numSamples));
 				client.SendLooped((uint8_t*)&trigphase, sizeof(trigphase));

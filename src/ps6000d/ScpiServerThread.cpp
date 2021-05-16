@@ -710,11 +710,7 @@ void ScpiServerThread()
 			{
 				lock_guard<mutex> lock(g_mutex);
 
-				if(g_pico_type == PICO3000A)
-					ps3000aStop(g_hScope);
-				else if(g_pico_type == PICO6000A)
-					ps6000aStop(g_hScope);
-
+				Stop();
 				g_triggerArmed = false;
 			}
 
@@ -747,7 +743,20 @@ void ScpiServerThread()
 					lock_guard<mutex> lock(g_mutex);
 					g_triggerChannel = args[0][0] - 'A';
 
+					if(!g_channelOn[g_triggerChannel])
+					{
+						LogDebug("Trigger channel wasn't on, enabling it\n");
+						g_channelOn[g_triggerChannel] = true;
+						UpdateChannel(g_triggerChannel);
+					}
+
+					bool wasOn = g_triggerArmed;
+					Stop();
+
 					UpdateTrigger();
+
+					if(wasOn)
+						StartCapture(false);
 				}
 
 				else if( (cmd == "DELAY") && (args.size() == 1) )
@@ -950,6 +959,20 @@ void UpdateTrigger()
 		StartCapture(true);
 }
 
+void Stop()
+{
+	switch(g_pico_type)
+	{
+		case PICO3000A:
+			ps3000aStop(g_hScope);
+			break;
+
+		case PICO6000A:
+			ps6000aStop(g_hScope);
+			break;
+	}
+}
+
 void StartCapture(bool stopFirst)
 {
 	g_offsetDuringArm = g_offset;
@@ -966,31 +989,30 @@ void StartCapture(bool stopFirst)
 
 	PICO_STATUS status;
 	status = PICO_RESERVED_1;
+	if(stopFirst)
+		Stop();
 	switch(g_pico_type)
 	{
-	case PICO3000A:
-		if(stopFirst)
-			ps3000aStop(g_hScope);
-		// TODO: why the 1
-		status = ps3000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, 1, NULL, 0, NULL, NULL);
-		break;
-	case PICO6000A:
-		if(stopFirst)
-			ps6000aStop(g_hScope);
-		status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
-		break;
+		case PICO3000A:
+			// TODO: why the 1
+			status = ps3000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, 1, NULL, 0, NULL, NULL);
+			break;
+
+		case PICO6000A:
+			status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
+			break;
 	}
 
 	//not sure why this happens...
-	if(status == PICO_HARDWARE_CAPTURING_CALL_STOP)
+	while(status == PICO_HARDWARE_CAPTURING_CALL_STOP)
 	{
 		LogWarning("Got PICO_HARDWARE_CAPTURING_CALL_STOP (but scope should have been stopped already)\n");
-		ps6000aStop(g_hScope);
+		Stop();
 		status = ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
 	}
 
 	if(status != PICO_OK)
-		LogFatal("ps6000aRunBlock failed, code %d / 0x%x\n", status, status);
+		LogFatal("psXXXXRunBlock failed, code %d / 0x%x\n", status, status);
 
 	g_triggerArmed = true;
 }
