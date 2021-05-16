@@ -40,6 +40,8 @@ using namespace std;
 volatile bool g_waveformThreadQuit = false;
 float InterpolateTriggerTime(int16_t* buf);
 
+vector<PICO_CHANNEL> g_channelIDs;
+
 void WaveformServerThread()
 {
 	Socket client = g_dataSocket.Accept();
@@ -50,9 +52,13 @@ void WaveformServerThread()
 	if(!client.DisableNagle())
 		LogWarning("Failed to disable Nagle on socket, performance may be poor\n");
 
-	//Set up buffers
-	map<size_t, int16_t*> waveformBuffers;
+	//Set up channel IDs
+	for(size_t i=0; i<g_numChannels; i++)
+		g_channelIDs.push_back((PICO_CHANNEL)i);
+	for(size_t i=0; i<g_numDigitalPods; i++)
+		g_channelIDs.push_back((PICO_CHANNEL)(PICO_PORT0 + i));
 
+	map<size_t, int16_t*> waveformBuffers;
 	size_t numSamples = 0;
 	uint32_t numSamples_int = 0;
 	uint16_t numchans;
@@ -77,8 +83,7 @@ void WaveformServerThread()
 			lock_guard<mutex> lock(g_mutex);
 
 			//Stop the trigger
-			PICO_STATUS status;
-
+			PICO_STATUS status = PICO_OPERATION_FAILED;
 			if(g_pico_type == PICO6000A)
 				status = ps6000aStop(g_hScope);
 			else if(g_pico_type == PICO3000A)
@@ -93,16 +98,19 @@ void WaveformServerThread()
 			{
 				LogDebug("Reallocating buffers\n");
 
-				for(size_t i=0; i<g_numChannels; i++)
+				//Clear out old buffers
+				for(auto ch : g_channelIDs)
 				{
 					if(g_pico_type == PICO6000A)
-						ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)i, NULL,
+						ps6000aSetDataBuffer(g_hScope, ch, NULL,
 							0, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_CLEAR_ALL);
 					else if(g_pico_type == PICO3000A)
-						ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)i, NULL,
+						ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)ch, NULL,
 							0, 0, PS3000A_RATIO_MODE_NONE);
 				}
-				for(size_t i=0; i<g_numChannels; i++)
+
+				//Set up new ones
+				for(size_t i=0; i<g_channelIDs.size(); i++)
 				{
 					//Allocate memory if needed
 					if(waveformBuffers[i])
@@ -111,14 +119,15 @@ void WaveformServerThread()
 					memset(waveformBuffers[i], 0x00, g_captureMemDepth * sizeof(int16_t));
 
 					//Give it to the scope, removing any other buffer we might have
+					auto ch = g_channelIDs[i];
 					if(g_pico_type == PICO6000A)
-						status = ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)i, waveformBuffers[i],
+						status = ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)ch, waveformBuffers[i],
 							g_captureMemDepth, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_ADD);
 					else if(g_pico_type == PICO3000A)
-						status = ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)i, waveformBuffers[i],
+						status = ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)ch, waveformBuffers[i],
 							g_captureMemDepth, 0, PS3000A_RATIO_MODE_NONE);
 					if(status != PICO_OK)
-						LogFatal("ps6000aSetDataBuffer failed (code 0x%x)\n", status);
+						LogFatal("psXXXXSetDataBuffer for channel %d failed (code 0x%x)\n", ch, status);
 				}
 
 				g_memDepthChanged = false;
@@ -135,13 +144,18 @@ void WaveformServerThread()
 			if(status == PICO_NO_SAMPLES_AVAILABLE)
 				continue; // state changed while mutex was unlocked?
 			if(PICO_OK != status)
-				LogFatal("ps6000aGetValues (code 0x%x)\n", status);
+				LogFatal("psXXXXGetValues (code 0x%x)\n", status);
 
 			//Figure out how many channels are active in this capture
 			numchans = 0;
 			for(size_t i=0; i<g_numChannels; i++)
 			{
 				if(g_channelOnDuringArm[i])
+					numchans ++;
+			}
+			for(size_t i=0; i<g_numDigitalPods; i++)
+			{
+				if(g_msoPodEnabled[i])
 					numchans ++;
 			}
 		}
@@ -158,9 +172,10 @@ void WaveformServerThread()
 		float trigphase = InterpolateTriggerTime(waveformBuffers[g_triggerChannel]);
 
 		//Send data for each channel to the client
-		for(size_t i=0; i<g_numChannels; i++)
+		for(size_t i=0; i<g_channelIDs.size(); i++)
 		{
-			if(g_channelOnDuringArm[i])
+			//Analog channels
+			if((i < g_numChannels) && (g_channelOnDuringArm[i]) )
 			{
 				//Send channel ID, scale, offset, and memory depth
 				client.SendLooped((uint8_t*)&i, sizeof(i));
@@ -171,6 +186,16 @@ void WaveformServerThread()
 				client.SendLooped((uint8_t*)&config, sizeof(config));
 
 				//Send the actual waveform data
+				client.SendLooped((uint8_t*)waveformBuffers[i], numSamples * sizeof(int16_t));
+			}
+
+			//Digital channels
+			else if( (i >= g_numChannels) && (g_msoPodEnabledDuringArm[i - g_numChannels]) )
+			{
+				LogDebug("Sending digital (chnum=%zu)\n", i);
+				client.SendLooped((uint8_t*)&i, sizeof(i));
+				client.SendLooped((uint8_t*)&numSamples, sizeof(numSamples));
+				client.SendLooped((uint8_t*)&trigphase, sizeof(trigphase));
 				client.SendLooped((uint8_t*)waveformBuffers[i], numSamples * sizeof(int16_t));
 			}
 		}

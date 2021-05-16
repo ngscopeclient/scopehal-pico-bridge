@@ -74,6 +74,17 @@ extern size_t g_memDepth;
 extern std::map<size_t, bool> g_channelOnDuringArm;
 extern std::map<size_t, bool> g_channelOn;
 extern std::map<size_t, double> g_roundedRange;
+extern std::map<size_t, PICO_COUPLING> g_coupling;
+extern std::map<size_t, PICO_CONNECT_PROBE_RANGE> g_range;
+extern std::map<size_t, enPS3000ARange> g_range_3000a;
+extern std::map<size_t, double> g_offset;
+extern std::map<size_t, PICO_BANDWIDTH_LIMITER> g_bandwidth;
+extern std::map<size_t, size_t> g_bandwidth_legacy;
+
+extern bool g_msoPodEnabled[2];
+extern bool g_msoPodEnabledDuringArm[2];
+extern int16_t g_msoPodThreshold[2][8];
+extern PICO_DIGITAL_PORT_HYSTERESIS g_msoHysteresis[2];
 
 extern uint32_t g_timebase;
 extern int64_t g_sampleInterval;
@@ -91,5 +102,7 @@ extern bool g_memDepthChanged;
 extern std::mutex g_mutex;
 
 void StartCapture(bool stopFirst);
+void UpdateTrigger();
+void UpdateChannel(size_t chan);
 
 #endif

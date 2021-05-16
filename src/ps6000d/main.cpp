@@ -253,6 +253,34 @@ int main(int argc, char* argv[])
 		}
 	}
 
+	//Initialize analog channels
+	for(size_t i=0; i<g_numChannels; i++)
+	{
+		g_channelOn[i] = false;
+		g_coupling[i] = PICO_DC;
+		g_range[i] = PICO_X1_PROBE_1V;
+		g_range_3000a[i] = PS3000A_1V;
+		g_offset[i] = 0;
+		g_bandwidth[i] = PICO_BW_FULL;
+		g_bandwidth_legacy[i] = PS3000A_BW_FULL;
+	}
+
+	//Figure out digital channel configuration
+	if(g_pico_type == PICO6000A)
+		g_numDigitalPods = 2;
+	else
+		g_numDigitalPods = 0;
+	for(size_t i=0; i<g_numDigitalPods; i++)
+	{
+		g_msoPodEnabled[i] = false;
+		for(size_t j=0; j<8; j++)
+			g_msoPodThreshold[i][j] = 0;
+		g_msoHysteresis[i] = PICO_NORMAL_100MV;
+	}
+
+	//Push initial trigger config
+	UpdateTrigger();
+
 	//Set up signal handlers
 	signal(SIGINT, OnQuit);
 

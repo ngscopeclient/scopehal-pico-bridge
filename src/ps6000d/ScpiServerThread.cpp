@@ -153,9 +153,7 @@ size_t g_numDigitalPods = 2;
 int16_t g_msoPodThreshold[2][8] = { {0}, {0} };
 PICO_DIGITAL_PORT_HYSTERESIS g_msoHysteresis[2] = {PICO_NORMAL_100MV, PICO_NORMAL_100MV};
 bool g_msoPodEnabled[2] = {false};
-
-void UpdateTrigger();
-void UpdateChannel(size_t chan);
+bool g_msoPodEnabledDuringArm[2] = {false};
 
 std::mutex g_mutex;
 
@@ -196,34 +194,6 @@ bool ScpiRecv(Socket& sock, string& str)
  */
 void ScpiServerThread()
 {
-	for(size_t i=0; i<g_numChannels; i++)
-	{
-		g_channelOn[i] = false;
-		g_coupling[i] = PICO_DC;
-		g_range[i] = PICO_X1_PROBE_1V;
-		g_range_3000a[i] = PS3000A_1V;
-		g_offset[i] = 0;
-		g_bandwidth[i] = PICO_BW_FULL;
-		g_bandwidth_legacy[i] = PS3000A_BW_FULL;
-	}
-
-	//TODO: detect this somehow
-	//For now, assume every scope has two MSO pods.
-	g_numDigitalPods = 2;
-	for(size_t i=0; i<g_numDigitalPods; i++)
-	{
-		g_msoPodEnabled[i] = false;
-		for(size_t j=0; j<8; j++)
-			g_msoPodThreshold[i][j] = 0;
-		g_msoHysteresis[i] = PICO_NORMAL_100MV;
-	}
-
-	//Push initial trigger config
-	{
-		lock_guard<mutex> lock(g_mutex);
-		UpdateTrigger();
-	}
-
 	while(true)
 	{
 		Socket client = g_scpiSocket.Accept();
@@ -248,7 +218,7 @@ void ScpiServerThread()
 			if(!ScpiRecv(client, line))
 				break;
 			ParseScpiLine(line, subject, cmd, query, args);
-			LogVerbose((line + "\n").c_str());
+			LogTrace((line + "\n").c_str());
 
 			//Extract channel ID from subject and clamp bounds
 			size_t channelId = 0;
@@ -503,7 +473,7 @@ void ScpiServerThread()
 				else
 					g_msoHysteresis[channelId] = PICO_VERY_HIGH_400MV;
 
-				LogDebug("Setting MSO pod %zu hysteresis to %d mV (code %d)\n",
+				LogTrace("Setting MSO pod %zu hysteresis to %d mV (code %d)\n",
 					channelId, level, g_msoHysteresis[channelId]);
 
 				//Update the pod if currently active
@@ -677,7 +647,7 @@ void ScpiServerThread()
 				int16_t code = round( (level * 32767) / 5.0);
 				g_msoPodThreshold[channelId][laneId] = code;
 
-				LogDebug("Setting MSO pod %zu lane %zu threshold to %f (code %d)\n", channelId, laneId, level, code);
+				LogTrace("Setting MSO pod %zu lane %zu threshold to %f (code %d)\n", channelId, laneId, level, code);
 
 				lock_guard<mutex> lock(g_mutex);
 
@@ -984,13 +954,15 @@ void StartCapture(bool stopFirst)
 {
 	g_offsetDuringArm = g_offset;
 	g_channelOnDuringArm = g_channelOn;
+	for(size_t i=0; i<g_numDigitalPods; i++)
+		g_msoPodEnabledDuringArm[i] = g_msoPodEnabled[i];
 	g_captureMemDepth = g_memDepth;
 	g_sampleIntervalDuringArm = g_sampleInterval;
 	g_triggerSampleIndex = g_memDepth/2;
 
 	//TODO: implement g_triggerDelay
 
-	LogVerbose("StartCapture stopFirst %d memdepth %zu\n", stopFirst, g_memDepth);
+	LogTrace("StartCapture stopFirst %d memdepth %zu\n", stopFirst, g_memDepth);
 
 	PICO_STATUS status;
 	status = PICO_RESERVED_1;
