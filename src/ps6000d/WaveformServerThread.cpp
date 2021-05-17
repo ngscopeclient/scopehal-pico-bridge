@@ -221,6 +221,9 @@ void WaveformServerThread()
 
 float InterpolateTriggerTime(int16_t* buf)
 {
+	if(g_triggerSampleIndex <= 0)
+		return 0;
+
 	float trigscale = g_roundedRange[g_triggerChannel] / 32512;
 	float trigoff = g_offsetDuringArm[g_triggerChannel];
 

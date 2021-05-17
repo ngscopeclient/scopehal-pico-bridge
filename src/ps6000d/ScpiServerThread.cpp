@@ -142,7 +142,7 @@ bool g_triggerOneShot = false;
 bool g_memDepthChanged = false;
 
 //Trigger state (for now, only simple single-channel trigger supported)
-uint64_t g_triggerDelay = 0;
+int64_t g_triggerDelay = 0;
 PICO_THRESHOLD_DIRECTION g_triggerDirection = PICO_RISING;
 float g_triggerVoltage = 0;
 size_t g_triggerChannel = 0;
@@ -928,31 +928,40 @@ void UpdateTrigger()
 	float trig_code = (g_triggerVoltage - offset) / scale;
 	//LogDebug("UpdateTrigger: trig_code = %.0f for %f V, scale=%f\n", round(trig_code), g_triggerVoltage, scale);
 
-	//TODO: Convert delay from fs to native units (samples? ps?)
+	//This can happen early on during initialization.
+	//Bail rather than dividing by zero.
+	if(g_sampleInterval == 0)
+		return;
+
+	//Add delay before start of capture if needed
+	int64_t triggerDelaySamples = g_triggerDelay / g_sampleInterval;
 	uint64_t delay = 0;
+	if(triggerDelaySamples < 0)
+		delay = -triggerDelaySamples;
 
 	switch(g_pico_type)
 	{
-	case PICO3000A:
-		ps3000aSetSimpleTrigger(
-			g_hScope,
-			1,
-			(PS3000A_CHANNEL)g_triggerChannel,
-			round(trig_code),
-			(enPS3000AThresholdDirection)g_triggerDirection, // same as 6000a api
-			delay,
-			0);
-		break;
-	case PICO6000A:
-		ps6000aSetSimpleTrigger(
-			g_hScope,
-			1,
-			(PICO_CHANNEL)g_triggerChannel,
-			round(trig_code),
-			g_triggerDirection,
-			delay,
-			0);
-		break;
+		case PICO3000A:
+			ps3000aSetSimpleTrigger(
+				g_hScope,
+				1,
+				(PS3000A_CHANNEL)g_triggerChannel,
+				round(trig_code),
+				(enPS3000AThresholdDirection)g_triggerDirection, // same as 6000a api
+				delay,
+				0);
+			break;
+
+		case PICO6000A:
+			ps6000aSetSimpleTrigger(
+				g_hScope,
+				1,
+				(PICO_CHANNEL)g_triggerChannel,
+				round(trig_code),
+				g_triggerDirection,
+				delay,
+				0);
+			break;
 	}
 
 	if(g_triggerArmed)
@@ -975,14 +984,20 @@ void Stop()
 
 PICO_STATUS StartInternal()
 {
+	//Calculate pre/post trigger time configuration based on trigger delay
+	int64_t triggerDelaySamples = g_triggerDelay / g_sampleInterval;
+	size_t nPreTrigger = min(max(triggerDelaySamples, 0L), (int64_t)g_memDepth);
+	size_t nPostTrigger = g_memDepth - nPreTrigger;
+	g_triggerSampleIndex = nPreTrigger;
+
 	switch(g_pico_type)
 	{
 		case PICO3000A:
 			// TODO: why the 1
-			return ps3000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, 1, NULL, 0, NULL, NULL);
+			return ps3000aRunBlock(g_hScope, nPreTrigger, nPostTrigger, g_timebase, 1, NULL, 0, NULL, NULL);
 
 		case PICO6000A:
-			return ps6000aRunBlock(g_hScope, g_memDepth/2, g_memDepth/2, g_timebase, NULL, 0, NULL, NULL);
+			return ps6000aRunBlock(g_hScope, nPreTrigger, nPostTrigger, g_timebase, NULL, 0, NULL, NULL);
 
 		default:
 			return PICO_OK;
@@ -997,9 +1012,6 @@ void StartCapture(bool stopFirst)
 		g_msoPodEnabledDuringArm[i] = g_msoPodEnabled[i];
 	g_captureMemDepth = g_memDepth;
 	g_sampleIntervalDuringArm = g_sampleInterval;
-	g_triggerSampleIndex = g_memDepth/2;
-
-	//TODO: implement g_triggerDelay
 
 	LogTrace("StartCapture stopFirst %d memdepth %zu\n", stopFirst, g_memDepth);
 
