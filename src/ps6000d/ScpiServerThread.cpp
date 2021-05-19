@@ -155,6 +155,8 @@ PICO_DIGITAL_PORT_HYSTERESIS g_msoHysteresis[2] = {PICO_NORMAL_100MV, PICO_NORMA
 bool g_msoPodEnabled[2] = {false};
 bool g_msoPodEnabledDuringArm[2] = {false};
 
+bool EnableMsoPod(size_t npod);
+
 std::mutex g_mutex;
 
 /**
@@ -478,17 +480,7 @@ void ScpiServerThread()
 
 				//Update the pod if currently active
 				if(g_msoPodEnabled[channelId])
-				{
-					PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
-					auto status = ps6000aSetDigitalPortOn(
-						g_hScope,
-						podId,
-						g_msoPodThreshold[channelId],
-						8,
-						g_msoHysteresis[channelId]);
-					if(status != PICO_OK)
-						LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
-				}
+					EnableMsoPod(channelId);
 			}
 
 			else if( (cmd == "OFFS") && (args.size() == 1) )
@@ -653,17 +645,7 @@ void ScpiServerThread()
 
 				//Update the pod if currently active
 				if(g_msoPodEnabled[channelId])
-				{
-					PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
-					auto status = ps6000aSetDigitalPortOn(
-						g_hScope,
-						podId,
-						g_msoPodThreshold[channelId],
-						8,
-						g_msoHysteresis[channelId]);
-					if(status != PICO_OK)
-						LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
-				}
+					EnableMsoPod(channelId);
 			}
 
 			else if( (cmd == "DEPTH") && (args.size() == 1) )
@@ -741,13 +723,31 @@ void ScpiServerThread()
 				else if( (cmd == "SOU") && (args.size() == 1) )
 				{
 					lock_guard<mutex> lock(g_mutex);
-					g_triggerChannel = args[0][0] - 'A';
 
-					if(!g_channelOn[g_triggerChannel])
+					if(isalpha(args[0][0]))
 					{
-						LogDebug("Trigger channel wasn't on, enabling it\n");
-						g_channelOn[g_triggerChannel] = true;
-						UpdateChannel(g_triggerChannel);
+						g_triggerChannel = args[0][0] - 'A';
+						LogDebug("Triggering on analog channel %zu (%s)\n", g_triggerChannel, args[0].c_str());
+
+						if(!g_channelOn[g_triggerChannel])
+						{
+							LogDebug("Trigger channel wasn't on, enabling it\n");
+							g_channelOn[g_triggerChannel] = true;
+							UpdateChannel(g_triggerChannel);
+						}
+					}
+					else if( (isdigit(args[0][0])) && (args[0].length() == 3) )
+					{
+						int npod = args[0][0] - '1';
+						int nchan = args[0][2] - '0';
+						LogDebug("Triggering on digital pod %d channel %d\n", npod, nchan);
+						g_triggerChannel = g_numChannels + npod*8 + nchan;
+
+						if(!g_msoPodEnabled[npod])
+						{
+							LogDebug("Trigger pod wasn't on, enabling it\n");
+							EnableMsoPod(npod);
+						}
 					}
 
 					bool wasOn = g_triggerArmed;
@@ -920,11 +920,19 @@ void UpdateChannel(size_t chan)
  */
 void UpdateTrigger()
 {
+	bool triggerIsAnalog = (g_triggerChannel < g_numChannels);
+
 	//Convert threshold from volts to ADC counts
-	float offset = g_offset[g_triggerChannel];
-	float scale = g_roundedRange[g_triggerChannel] / 32512;
-	if(scale == 0)
-		scale = 1;
+	float offset = 0;
+	if(triggerIsAnalog)
+		offset = g_offset[g_triggerChannel];
+	float scale = 1;
+	if(triggerIsAnalog)
+	{
+		scale = g_roundedRange[g_triggerChannel] / 32512;
+		if(scale == 0)
+			scale = 1;
+	}
 	float trig_code = (g_triggerVoltage - offset) / scale;
 	//LogDebug("UpdateTrigger: trig_code = %.0f for %f V, scale=%f\n", round(trig_code), g_triggerVoltage, scale);
 
@@ -953,14 +961,52 @@ void UpdateTrigger()
 			break;
 
 		case PICO6000A:
-			ps6000aSetSimpleTrigger(
-				g_hScope,
-				1,
-				(PICO_CHANNEL)g_triggerChannel,
-				round(trig_code),
-				g_triggerDirection,
-				delay,
-				0);
+			if(g_triggerChannel < g_numChannels)
+			{
+				ps6000aSetSimpleTrigger(
+					g_hScope,
+					1,
+					(PICO_CHANNEL)g_triggerChannel,
+					round(trig_code),
+					g_triggerDirection,
+					delay,
+					0);
+			}
+			else
+			{
+				//Remove old trigger conditions
+				auto status = ps6000aSetTriggerChannelConditions(
+					g_hScope,
+					NULL,
+					0,
+					PICO_CLEAR_ALL);
+				LogDebug("status 1 = %d\n", status);
+
+				//Set up new conditions
+				int ntrig = g_triggerChannel - g_numChannels;
+				int trigpod = ntrig / 8;
+				int triglane = ntrig % 8;
+				PICO_CONDITION cond;
+				cond.source = static_cast<PICO_CHANNEL>(PICO_PORT0 + trigpod);
+				cond.condition = PICO_CONDITION_TRUE;
+				status = ps6000aSetTriggerChannelConditions(
+					g_hScope,
+					&cond,
+					1,
+					PICO_ADD);
+				LogDebug("status 2 = %d\n", status);
+
+				//Set up configuration on the selected channel
+				PICO_DIGITAL_CHANNEL_DIRECTIONS dirs;
+				dirs.channel = static_cast<PICO_PORT_DIGITAL_CHANNEL>(PICO_PORT_DIGITAL_CHANNEL0 + triglane);
+				dirs.direction = PICO_DIGITAL_DIRECTION_RISING;				//TODO: configurable
+				status = ps6000aSetTriggerDigitalPortProperties(
+					g_hScope,
+					cond.source,
+					&dirs,
+					1);
+				LogDebug("status 3 = %d\n", status);
+			}
 			break;
 	}
 
@@ -1033,4 +1079,24 @@ void StartCapture(bool stopFirst)
 		LogFatal("psXXXXRunBlock failed, code %d / 0x%x\n", status, status);
 
 	g_triggerArmed = true;
+}
+
+bool EnableMsoPod(size_t npod)
+{
+	g_msoPodEnabled[npod] = true;
+
+	PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + npod);
+	auto status = ps6000aSetDigitalPortOn(
+		g_hScope,
+		podId,
+		g_msoPodThreshold[npod],
+		8,
+		g_msoHysteresis[npod]);
+	if(status != PICO_OK)
+	{
+		LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
+		return false;
+	}
+
+	return true;
 }

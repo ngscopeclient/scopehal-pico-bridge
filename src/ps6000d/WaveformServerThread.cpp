@@ -168,8 +168,11 @@ void WaveformServerThread()
 
 		//TODO: send overflow flags to client
 
-		//Interpolate trigger position if we're using a simple level trigger
-		float trigphase = InterpolateTriggerTime(waveformBuffers[g_triggerChannel]);
+		//Interpolate trigger position if we're using an analog level trigger
+		bool triggerIsAnalog = (g_triggerChannel < g_numChannels);
+		float trigphase = 0;
+		if(triggerIsAnalog)
+			trigphase = InterpolateTriggerTime(waveformBuffers[g_triggerChannel]);
 
 		//Send data for each channel to the client
 		for(size_t i=0; i<g_channelIDs.size(); i++)
