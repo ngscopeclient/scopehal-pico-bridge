@@ -666,11 +666,23 @@ void ScpiServerThread()
 					continue;
 				}
 
+				//Make sure we've got something to capture
 				bool anyChannels = false;
 				for(size_t i=0; i<g_numChannels; i++)
 				{
 					if(g_channelOn[i])
+					{
 						anyChannels = true;
+						break;
+					}
+				}
+				for(size_t i=0; i<g_numDigitalPods; i++)
+				{
+					if(g_msoPodEnabled[i])
+					{
+						anyChannels = true;
+						break;
+					}
 				}
 
 				if(!anyChannels)
