@@ -727,8 +727,6 @@ void ScpiServerThread()
 					if(isalpha(args[0][0]))
 					{
 						g_triggerChannel = args[0][0] - 'A';
-						LogDebug("Triggering on analog channel %zu (%s)\n", g_triggerChannel, args[0].c_str());
-
 						if(!g_channelOn[g_triggerChannel])
 						{
 							LogDebug("Trigger channel wasn't on, enabling it\n");
@@ -740,7 +738,6 @@ void ScpiServerThread()
 					{
 						int npod = args[0][0] - '1';
 						int nchan = args[0][2] - '0';
-						LogDebug("Triggering on digital pod %d channel %d\n", npod, nchan);
 						g_triggerChannel = g_numChannels + npod*8 + nchan;
 
 						if(!g_msoPodEnabled[npod])
@@ -975,12 +972,11 @@ void UpdateTrigger()
 			else
 			{
 				//Remove old trigger conditions
-				auto status = ps6000aSetTriggerChannelConditions(
+				ps6000aSetTriggerChannelConditions(
 					g_hScope,
 					NULL,
 					0,
 					PICO_CLEAR_ALL);
-				LogDebug("status 1 = %d\n", status);
 
 				//Set up new conditions
 				int ntrig = g_triggerChannel - g_numChannels;
@@ -989,23 +985,21 @@ void UpdateTrigger()
 				PICO_CONDITION cond;
 				cond.source = static_cast<PICO_CHANNEL>(PICO_PORT0 + trigpod);
 				cond.condition = PICO_CONDITION_TRUE;
-				status = ps6000aSetTriggerChannelConditions(
+				ps6000aSetTriggerChannelConditions(
 					g_hScope,
 					&cond,
 					1,
 					PICO_ADD);
-				LogDebug("status 2 = %d\n", status);
 
 				//Set up configuration on the selected channel
 				PICO_DIGITAL_CHANNEL_DIRECTIONS dirs;
 				dirs.channel = static_cast<PICO_PORT_DIGITAL_CHANNEL>(PICO_PORT_DIGITAL_CHANNEL0 + triglane);
 				dirs.direction = PICO_DIGITAL_DIRECTION_RISING;				//TODO: configurable
-				status = ps6000aSetTriggerDigitalPortProperties(
+				ps6000aSetTriggerDigitalPortProperties(
 					g_hScope,
 					cond.source,
 					&dirs,
 					1);
-				LogDebug("status 3 = %d\n", status);
 			}
 			break;
 	}
@@ -1070,9 +1064,19 @@ void StartCapture(bool stopFirst)
 	//not sure why this happens...
 	while(status == PICO_HARDWARE_CAPTURING_CALL_STOP)
 	{
-		LogWarning("Got PICO_HARDWARE_CAPTURING_CALL_STOP (but scope should have been stopped already)\n");
+		//Not sure what causes this, but seems to be harmless?
+		//Demote to trace for now
+		LogTrace("Got PICO_HARDWARE_CAPTURING_CALL_STOP (but scope should have been stopped already)\n");
+
 		Stop();
 		status = StartInternal();
+
+		//Nothing enabled? Stop
+		if(status == PICO_NO_CHANNELS_OR_PORTS_ENABLED)
+		{
+			g_triggerArmed = false;
+			return;
+		}
 	}
 
 	if(status != PICO_OK)

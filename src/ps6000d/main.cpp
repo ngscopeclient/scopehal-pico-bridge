@@ -283,6 +283,7 @@ int main(int argc, char* argv[])
 
 	//Set up signal handlers
 	signal(SIGINT, OnQuit);
+	signal(SIGPIPE, SIG_IGN);
 
 	//Configure the data plane socket
 	g_dataSocket.Bind(waveform_port);

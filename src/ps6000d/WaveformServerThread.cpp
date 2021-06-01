@@ -96,7 +96,7 @@ void WaveformServerThread()
 			//Set up buffers if needed
 			if(g_memDepthChanged || waveformBuffers.empty())
 			{
-				LogDebug("Reallocating buffers\n");
+				LogTrace("Reallocating buffers\n");
 
 				//Clear out old buffers
 				for(auto ch : g_channelIDs)
