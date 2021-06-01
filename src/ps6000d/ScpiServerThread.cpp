@@ -653,8 +653,7 @@ void ScpiServerThread()
 				lock_guard<mutex> lock(g_mutex);
 				g_memDepth = stoull(args[0]);
 
-				if(g_triggerArmed)
-					StartCapture(true);
+				UpdateTrigger();
 			}
 
 			else if( (cmd == "START") || (cmd == "SINGLE") )
@@ -679,9 +678,6 @@ void ScpiServerThread()
 					LogVerbose("Ignoring START command because no channels are active\n");
 					continue;
 				}
-
-				if(g_captureMemDepth != g_memDepth)
-					g_memDepthChanged = true;
 
 				//Start the capture
 				StartCapture(false);
@@ -1050,10 +1046,12 @@ void StartCapture(bool stopFirst)
 	g_channelOnDuringArm = g_channelOn;
 	for(size_t i=0; i<g_numDigitalPods; i++)
 		g_msoPodEnabledDuringArm[i] = g_msoPodEnabled[i];
+	if(g_captureMemDepth != g_memDepth)
+		g_memDepthChanged = true;
 	g_captureMemDepth = g_memDepth;
 	g_sampleIntervalDuringArm = g_sampleInterval;
 
-	LogTrace("StartCapture stopFirst %d memdepth %zu\n", stopFirst, g_memDepth);
+	LogTrace("StartCapture stopFirst %d memdepth %zu\n", stopFirst, g_captureMemDepth);
 
 	PICO_STATUS status;
 	status = PICO_RESERVED_1;
