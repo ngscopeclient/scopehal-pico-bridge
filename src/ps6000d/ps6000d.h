@@ -102,9 +102,11 @@ extern bool g_memDepthChanged;
 extern std::mutex g_mutex;
 
 void Stop();
-void StartCapture(bool stopFirst);
+void StartCapture(bool stopFirst, bool force = false);
 PICO_STATUS StartInternal();
-void UpdateTrigger();
+void UpdateTrigger(bool force = false);
 void UpdateChannel(size_t chan);
+
+extern bool g_lastTriggerWasForced;
 
 #endif

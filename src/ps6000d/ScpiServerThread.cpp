@@ -160,6 +160,8 @@ bool g_msoPodEnabledDuringArm[2] = {false};
 
 bool EnableMsoPod(size_t npod);
 
+bool g_lastTriggerWasForced = false;
+
 std::mutex g_mutex;
 
 /**
@@ -701,7 +703,15 @@ void ScpiServerThread()
 
 			else if(cmd == "FORCE")
 			{
-				LogError("force trigger command not implemented yet\n");
+				//Clear out any old trigger config
+				if(g_triggerArmed)
+				{
+					Stop();
+					g_triggerArmed = false;
+				}
+
+				UpdateTrigger(true);
+				StartCapture(true, true);
 			}
 
 			else if(cmd == "STOP")
@@ -931,8 +941,19 @@ void UpdateChannel(size_t chan)
 /**
 	@brief Pushes trigger configuration to the instrument
  */
-void UpdateTrigger()
+void UpdateTrigger(bool force)
 {
+	//Timeout, in microseconds, before initiating a trigger
+	//Force trigger is really just a one-shot auto trigger with a 1us delay.
+	uint32_t timeout = 0;
+	if(force)
+	{
+		timeout = 1;
+		g_lastTriggerWasForced = true;
+	}
+	else
+		g_lastTriggerWasForced = false;
+
 	bool triggerIsAnalog = (g_triggerChannel < g_numChannels);
 
 	//Convert threshold from volts to ADC counts
@@ -970,7 +991,7 @@ void UpdateTrigger()
 				round(trig_code),
 				(enPS3000AThresholdDirection)g_triggerDirection, // same as 6000a api
 				delay,
-				0);
+				timeout);
 			break;
 
 		case PICO6000A:
@@ -983,7 +1004,7 @@ void UpdateTrigger()
 					round(trig_code),
 					g_triggerDirection,
 					delay,
-					0);
+					timeout);
 			}
 			else
 			{
@@ -1016,6 +1037,11 @@ void UpdateTrigger()
 					cond.source,
 					&dirs,
 					1);
+
+				//ps6000aSetTriggerDigitalPortProperties doesn't have a timeout!
+				//Should we call ps6000aSetTriggerChannelProperties with no elements to do this?
+				if(force)
+					LogWarning("Force trigger doesn't currently work if trigger source is digital\n");
 			}
 			break;
 	}
@@ -1060,8 +1086,15 @@ PICO_STATUS StartInternal()
 	}
 }
 
-void StartCapture(bool stopFirst)
+void StartCapture(bool stopFirst, bool force)
 {
+	//If previous trigger was forced, we need to reconfigure the trigger to be not-forced now
+	if(g_lastTriggerWasForced && !force)
+	{
+		Stop();
+		UpdateTrigger();
+	}
+
 	g_offsetDuringArm = g_offset;
 	g_channelOnDuringArm = g_channelOn;
 	for(size_t i=0; i<g_numDigitalPods; i++)
