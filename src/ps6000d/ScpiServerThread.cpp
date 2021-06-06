@@ -76,6 +76,9 @@
 		EXIT
 			Terminates the connection
 
+		FORCE
+			Forces a single acquisition
+
 		RATE [num]
 			Sets sample rate
 
@@ -696,6 +699,11 @@ void ScpiServerThread()
 				g_triggerOneShot = (cmd == "SINGLE");
 			}
 
+			else if(cmd == "FORCE")
+			{
+				LogError("force trigger command not implemented yet\n");
+			}
+
 			else if(cmd == "STOP")
 			{
 				lock_guard<mutex> lock(g_mutex);
@@ -1080,17 +1088,15 @@ void StartCapture(bool stopFirst)
 
 		Stop();
 		status = StartInternal();
-
-		//Nothing enabled? Stop
-		if(status == PICO_NO_CHANNELS_OR_PORTS_ENABLED)
-		{
-			g_triggerArmed = false;
-			return;
-		}
 	}
 
+	//Don't choke if we couldn't start the block
 	if(status != PICO_OK)
-		LogFatal("psXXXXRunBlock failed, code %d / 0x%x\n", status, status);
+	{
+		LogWarning("psXXXXRunBlock failed, code %d / 0x%x\n", status, status);
+		g_triggerArmed = false;
+		return;
+	}
 
 	g_triggerArmed = true;
 }
