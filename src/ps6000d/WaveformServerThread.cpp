@@ -44,6 +44,10 @@ vector<PICO_CHANNEL> g_channelIDs;
 
 void WaveformServerThread()
 {
+	#ifdef __linux__
+	pthread_setname_np(pthread_self(), "WaveformThread");
+	#endif
+
 	Socket client = g_dataSocket.Accept();
 	LogVerbose("Client connected to data plane socket\n");
 
@@ -109,12 +113,21 @@ void WaveformServerThread()
 							0, 0, PS3000A_RATIO_MODE_NONE);
 				}
 
+				//Clear out old buffers
+				for(size_t i=0; i<g_channelIDs.size(); i++)
+				{
+					if(waveformBuffers[i])
+					{
+						delete[] waveformBuffers[i];
+						waveformBuffers[i] = NULL;
+					}
+				}
+
 				//Set up new ones
+				//TODO: Only allocate memory if the channel is actually enabled
 				for(size_t i=0; i<g_channelIDs.size(); i++)
 				{
 					//Allocate memory if needed
-					if(waveformBuffers[i])
-						delete[] waveformBuffers[i];
 					waveformBuffers[i] = new int16_t[g_captureMemDepth];
 					memset(waveformBuffers[i], 0x00, g_captureMemDepth * sizeof(int16_t));
 

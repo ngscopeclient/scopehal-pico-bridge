@@ -201,6 +201,10 @@ bool ScpiRecv(Socket& sock, string& str)
  */
 void ScpiServerThread()
 {
+	#ifdef __linux__
+	pthread_setname_np(pthread_self(), "ScpiThread");
+	#endif
+
 	while(true)
 	{
 		Socket client = g_scpiSocket.Accept();
@@ -397,6 +401,9 @@ void ScpiServerThread()
 					UpdateChannel(channelId);
 				}
 
+				//We need to allocate new buffers for this channel
+				g_memDepthChanged = true;
+
 			}
 			else if(cmd == "OFF")
 			{
@@ -414,6 +421,9 @@ void ScpiServerThread()
 					g_channelOn[channelId] = false;
 					UpdateChannel(channelId);
 				}
+
+				//Free the memory used by this channel
+				g_memDepthChanged = true;
 			}
 
 			else if( (cmd == "BITS") && (args.size() == 1) )
