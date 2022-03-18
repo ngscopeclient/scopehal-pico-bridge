@@ -2,7 +2,7 @@
 *                                                                                                                      *
 * ps6000d                                                                                                              *
 *                                                                                                                      *
-* Copyright (c) 2012-2021 Andrew D. Zonenberg                                                                          *
+* Copyright (c) 2012-2022 Andrew D. Zonenberg                                                                          *
 * All rights reserved.                                                                                                 *
 *                                                                                                                      *
 * Redistribution and use in source and binary forms, with or without modification, are permitted provided that the     *
@@ -34,6 +34,7 @@
  */
 
 #include "ps6000d.h"
+#include "PicoSCPIServer.h"
 #include <signal.h>
 
 PICO_STATUS (*picoGetUnitInfo) (int16_t, int8_t *, int16_t, int16_t *, PICO_INFO);
@@ -292,7 +293,26 @@ int main(int argc, char* argv[])
 	//Launch the control plane socket server
 	g_scpiSocket.Bind(scpi_port);
 	g_scpiSocket.Listen();
-	ScpiServerThread();
+
+	while(true)
+	{
+		Socket scpiClient = g_scpiSocket.Accept();
+		if(!scpiClient.IsValid())
+			break;
+
+		//Create a server object for this connection
+		PicoSCPIServer server(scpiClient.Detach());
+
+		//Launch the data-plane thread
+		thread dataThread(WaveformServerThread);
+
+		//Process connections on the socket
+		server.MainLoop();
+
+		g_waveformThreadQuit = true;
+		dataThread.join();
+		g_waveformThreadQuit = false;
+	}
 
 	//Done
 	ps6000aCloseUnit(g_hScope);

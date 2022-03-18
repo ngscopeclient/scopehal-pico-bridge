@@ -24,7 +24,7 @@ endif()
 ###############################################################################
 #C++ compilation
 add_executable(ps6000d
-	ScpiServerThread.cpp
+	PicoSCPIServer.cpp
 	WaveformServerThread.cpp
 	main.cpp
 )

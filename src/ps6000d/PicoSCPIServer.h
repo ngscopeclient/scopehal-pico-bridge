@@ -2,7 +2,7 @@
 *                                                                                                                      *
 * ps6000d                                                                                                              *
 *                                                                                                                      *
-* Copyright (c) 2012-2021 Andrew D. Zonenberg                                                                          *
+* Copyright (c) 2012-2022 Andrew D. Zonenberg                                                                          *
 * All rights reserved.                                                                                                 *
 *                                                                                                                      *
 * Redistribution and use in source and binary forms, with or without modification, are permitted provided that the     *
@@ -27,85 +27,47 @@
 *                                                                                                                      *
 ***********************************************************************************************************************/
 
-#ifndef ps6000d_h
-#define ps6000d_h
+/**
+	@file
+	@author Andrew D. Zonenberg
+	@brief Declaration of PicoSCPIServer
+ */
 
-#include "../../lib/log/log.h"
-#include "../../lib/xptools/Socket.h"
+#ifndef PicoSCPIServer_h
+#define PicoSCPIServer_h
 
-#ifdef _WIN32
-#include <windows.h>
-#include <shlwapi.h>
-#endif
+#include "../../lib/scpi-server-tools/BridgeSCPIServer.h"
 
-#include <thread>
-#include <map>
-#include <mutex>
-
-#include "ps3000aApi.h"
-#include "ps6000aApi.h"
-#include "PicoStatus.h"
-#include "PicoVersion.h"
-
-enum PicoScopeType
+/**
+	@brief SCPI server for managing control plane traffic to a single client
+ */
+class PicoSCPIServer : public BridgeSCPIServer
 {
-	PICO3000A,
-	PICO6000A
+public:
+	PicoSCPIServer(ZSOCKET sock);
+	virtual ~PicoSCPIServer();
+
+protected:
+	virtual std::string GetMake();
+	virtual std::string GetModel();
+	virtual std::string GetSerial();
+	virtual std::string GetFirmwareVersion();
+	virtual size_t GetAnalogChannelCount();
+	virtual std::vector<size_t> GetSampleRates();
+	virtual std::vector<size_t> GetSampleDepths();
+
+	virtual void OnCommand(
+		const std::string& line,
+		const std::string& subject,
+		const std::string& cmd,
+		const std::vector<std::string>& args);
+
+	virtual bool OnQuery(
+		const std::string& line,
+		const std::string& subject,
+		const std::string& cmd);
+
+	virtual size_t GetChannelID(const std::string& subject);
 };
-
-extern Socket g_scpiSocket;
-extern Socket g_dataSocket;
-extern int16_t g_hScope;
-
-void WaveformServerThread();
-
-extern PicoScopeType g_pico_type;
-extern std::string g_model;
-extern std::string g_serial;
-extern std::string g_fwver;
-
-extern size_t g_numChannels;
-extern size_t g_numDigitalPods;
-
-extern volatile bool g_waveformThreadQuit;
-extern size_t g_captureMemDepth;
-extern size_t g_memDepth;
-extern std::map<size_t, bool> g_channelOnDuringArm;
-extern std::map<size_t, bool> g_channelOn;
-extern std::map<size_t, double> g_roundedRange;
-extern std::map<size_t, PICO_COUPLING> g_coupling;
-extern std::map<size_t, PICO_CONNECT_PROBE_RANGE> g_range;
-extern std::map<size_t, enPS3000ARange> g_range_3000a;
-extern std::map<size_t, double> g_offset;
-extern std::map<size_t, PICO_BANDWIDTH_LIMITER> g_bandwidth;
-extern std::map<size_t, size_t> g_bandwidth_legacy;
-
-extern bool g_msoPodEnabled[2];
-extern bool g_msoPodEnabledDuringArm[2];
-extern int16_t g_msoPodThreshold[2][8];
-extern PICO_DIGITAL_PORT_HYSTERESIS g_msoHysteresis[2];
-
-extern uint32_t g_timebase;
-extern int64_t g_sampleInterval;
-extern int64_t g_sampleIntervalDuringArm;
-extern std::map<size_t, double> g_offsetDuringArm;
-
-extern size_t g_triggerSampleIndex;
-extern size_t g_triggerChannel;
-extern float g_triggerVoltage;
-
-extern bool g_triggerArmed;
-extern bool g_triggerOneShot;
-extern bool g_memDepthChanged;
-
-extern std::mutex g_mutex;
-
-void Stop();
-void StartCapture(bool stopFirst, bool force = false);
-PICO_STATUS StartInternal();
-void UpdateTrigger(bool force = false);
-void UpdateChannel(size_t chan);
-
-extern bool g_lastTriggerWasForced;
 
 #endif
