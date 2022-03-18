@@ -4,3 +4,6 @@
 [submodule "lib/xptools"]
 	path = lib/xptools
 	url = ../xptools
+[submodule "lib/scpi-server-tools"]
+	path = lib/scpi-server-tools
+	url = ../scpi-server-tools

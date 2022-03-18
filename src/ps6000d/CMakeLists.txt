@@ -36,6 +36,7 @@ if(WIN32)
 	target_link_libraries(ps6000d
 	xptools
 	log
+	scpi-server-tools
 	${PICO_SDK_PATH}/lib/ps3000a.lib
 	${PICO_SDK_PATH}/lib/ps6000a.lib
 	)
@@ -44,6 +45,7 @@ else()
 	target_link_libraries(ps6000d
 	xptools
 	log
+	scpi-server-tools
 	${PICO_SDK_PATH}/lib/libps3000a.so
 	${PICO_SDK_PATH}/lib/libps6000a.so
 	)
