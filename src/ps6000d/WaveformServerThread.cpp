@@ -2,7 +2,7 @@
 *                                                                                                                      *
 * ps6000d                                                                                                              *
 *                                                                                                                      *
-* Copyright (c) 2012-2021 Andrew D. Zonenberg                                                                          *
+* Copyright (c) 2012-2022 Andrew D. Zonenberg                                                                          *
 * All rights reserved.                                                                                                 *
 *                                                                                                                      *
 * Redistribution and use in source and binary forms, with or without modification, are permitted provided that the     *
@@ -30,7 +30,7 @@
 /**
 	@file
 	@author Andrew D. Zonenberg
-	@brief SCPI server. Control plane traffic only, no waveform data.
+	@brief Waveform data thread (data plane traffic only, no control plane SCPI)
  */
 #include "ps6000d.h"
 #include <string.h>
