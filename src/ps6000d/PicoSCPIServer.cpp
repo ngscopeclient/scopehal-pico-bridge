@@ -203,11 +203,6 @@ PicoSCPIServer::~PicoSCPIServer()
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Command parsing
 
-size_t PicoSCPIServer::GetChannelID(const string& subject)
-{
-	return 0;
-}
-
 bool PicoSCPIServer::OnQuery(
 		const string& line,
 		const string& subject,
@@ -376,84 +371,21 @@ vector<size_t> PicoSCPIServer::GetSampleDepths()
 	return depths;
 }
 
-void PicoSCPIServer::OnCommand(
+bool PicoSCPIServer::OnCommand(
 		const string& line,
 		const string& subject,
 		const string& cmd,
 		const vector<string>& args)
 {
-	//Extract channel ID from subject and clamp bounds
-	size_t channelId = 0;
-	size_t laneId = 0;
-	bool channelIsDigital = false;
-	if(isalpha(subject[0]))
-	{
-		channelId = min(static_cast<size_t>(subject[0] - 'A'), g_numChannels);
-		channelIsDigital = false;
-	}
-	else if(isdigit(subject[0]))
-	{
-		channelId = min(subject[0] - '0', 2) - 1;
-		channelIsDigital = true;
-		if(subject.length() >= 3)
-			laneId = min(subject[2] - '0', 7);
-	}
-
-	if(cmd == "ON")
-	{
-		lock_guard<mutex> lock(g_mutex);
-
-		if(channelIsDigital)
-		{
-			PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
-			auto status = ps6000aSetDigitalPortOn(
-				g_hScope,
-				podId,
-				g_msoPodThreshold[channelId],
-				8,
-				g_msoHysteresis[channelId]);
-			if(status != PICO_OK)
-				LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
-			else
-				g_msoPodEnabled[channelId] = true;
-		}
-		else
-		{
-			g_channelOn[channelId] = true;
-			UpdateChannel(channelId);
-		}
-
-		//We need to allocate new buffers for this channel
-		g_memDepthChanged = true;
-
-	}
-	else if(cmd == "OFF")
-	{
-		lock_guard<mutex> lock(g_mutex);
-
-		if(channelIsDigital)
-		{
-			PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
-			auto status = ps6000aSetDigitalPortOff(g_hScope, podId);
-			if(status != PICO_OK)
-				LogError("ps6000aSetDigitalPortOff failed with code %x\n", status);
-		}
-		else
-		{
-			g_channelOn[channelId] = false;
-			UpdateChannel(channelId);
-		}
-
-		//Free the memory used by this channel
-		g_memDepthChanged = true;
-	}
+	if(BridgeSCPIServer::OnCommand(line, subject, cmd, args))
+		return true;
 
 	else if( (cmd == "BITS") && (args.size() == 1) )
 	{
 		lock_guard<mutex> lock(g_mutex);
 
 		if(g_pico_type != PICO6000A)
-			return;
+			return false;
 
 		ps6000aStop(g_hScope);
 
@@ -484,357 +416,8 @@ void PicoSCPIServer::OnCommand(
 			StartCapture(false);
 	}
 
-	else if( (cmd == "COUP") && (args.size() == 1) )
-	{
-		lock_guard<mutex> lock(g_mutex);
-		if(args[0] == "DC1M")
-			g_coupling[channelId] = PICO_DC;
-		else if(args[0] == "AC1M")
-			g_coupling[channelId] = PICO_AC;
-		else if(args[0] == "DC50")
-			g_coupling[channelId] = PICO_DC_50OHM;
-
-		UpdateChannel(channelId);
-	}
-
-	else if( (cmd == "HYS") && (args.size() == 1) )
-	{
-		lock_guard<mutex> lock(g_mutex);
-
-		//Calculate hysteresis
-		int level = stoi(args[0]);
-		if(level <= 50)
-			g_msoHysteresis[channelId] = PICO_LOW_50MV;
-		else if(level <= 100)
-			g_msoHysteresis[channelId] = PICO_NORMAL_100MV;
-		else if(level <= 200)
-			g_msoHysteresis[channelId] = PICO_HIGH_200MV;
-		else
-			g_msoHysteresis[channelId] = PICO_VERY_HIGH_400MV;
-
-		LogTrace("Setting MSO pod %zu hysteresis to %d mV (code %d)\n",
-			channelId, level, g_msoHysteresis[channelId]);
-
-		//Update the pod if currently active
-		if(g_msoPodEnabled[channelId])
-			EnableMsoPod(channelId);
-	}
-
-	else if( (cmd == "OFFS") && (args.size() == 1) )
-	{
-		lock_guard<mutex> lock(g_mutex);
-
-		double requestedOffset = stod(args[0]);
-
-		double maxoff;
-		double minoff;
-		float maxoff_f;
-		float minoff_f;
-
-		//Clamp to allowed range
-		switch(g_pico_type) {
-		case PICO3000A:
-			ps3000aGetAnalogueOffset(g_hScope, g_range_3000a[channelId], (PS3000A_COUPLING)g_coupling[channelId], &maxoff_f, &minoff_f);
-			maxoff = maxoff_f;
-			minoff = minoff_f;
-			break;
-		case PICO6000A:
-			ps6000aGetAnalogueOffsetLimits(g_hScope, g_range[channelId], g_coupling[channelId], &maxoff, &minoff);
-			break;
-		}
-		requestedOffset = min(maxoff, requestedOffset);
-		requestedOffset = max(minoff, requestedOffset);
-
-		g_offset[channelId] = requestedOffset;
-		UpdateChannel(channelId);
-	}
-
-	else if( (cmd == "RANGE") && (args.size() == 1) )
-	{
-		lock_guard<mutex> lock(g_mutex);
-		auto range = stod(args[0]);
-
-		//If 50 ohm coupling, cap hardware voltage range to 5V
-		if(g_coupling[channelId] == PICO_DC_50OHM)
-			range = min(range, 5.0);
-
-		if(range > 100 && g_pico_type == PICO6000A)
-		{
-			g_range[channelId] = PICO_X1_PROBE_200V;
-			g_roundedRange[channelId] = 200;
-		}
-		else if(range > 50 && g_pico_type == PICO6000A)
-		{
-			g_range[channelId] = PICO_X1_PROBE_100V;
-			g_roundedRange[channelId] = 100;
-		}
-		else if(range > 20)
-		{
-			g_range[channelId] = PICO_X1_PROBE_50V;
-			g_range_3000a[channelId] = PS3000A_50V;
-			g_roundedRange[channelId] = 50;
-		}
-		else if(range > 10)
-		{
-			g_range[channelId] = PICO_X1_PROBE_20V;
-			g_range_3000a[channelId] = PS3000A_20V;
-			g_roundedRange[channelId] = 20;
-		}
-		else if(range > 5)
-		{
-			g_range[channelId] = PICO_X1_PROBE_10V;
-			g_range_3000a[channelId] = PS3000A_10V;
-			g_roundedRange[channelId] = 10;
-		}
-		else if(range > 2)
-		{
-			g_range[channelId] = PICO_X1_PROBE_5V;
-			g_range_3000a[channelId] = PS3000A_5V;
-			g_roundedRange[channelId] = 5;
-		}
-		else if(range > 1)
-		{
-			g_range[channelId] = PICO_X1_PROBE_2V;
-			g_range_3000a[channelId] = PS3000A_2V;
-			g_roundedRange[channelId] = 2;
-		}
-		else if(range > 0.5)
-		{
-			g_range[channelId] = PICO_X1_PROBE_1V;
-			g_range_3000a[channelId] = PS3000A_1V;
-			g_roundedRange[channelId] = 1;
-		}
-		else if(range > 0.2)
-		{
-			g_range[channelId] = PICO_X1_PROBE_500MV;
-			g_range_3000a[channelId] = PS3000A_500MV;
-			g_roundedRange[channelId] = 0.5;
-		}
-		else if(range > 0.1)
-		{
-			g_range[channelId] = PICO_X1_PROBE_200MV;
-			g_range_3000a[channelId] = PS3000A_200MV;
-			g_roundedRange[channelId] = 0.2;
-		}
-		else if(range >= 0.05)
-		{
-			g_range[channelId] = PICO_X1_PROBE_100MV;
-			g_range_3000a[channelId] = PS3000A_100MV;
-			g_roundedRange[channelId] = 0.1;
-		}
-		else if(range >= 0.02)
-		{
-			g_range[channelId] = PICO_X1_PROBE_50MV;
-			g_range_3000a[channelId] = PS3000A_50MV;
-			g_roundedRange[channelId] = 0.05;
-		}
-		else if(range >= 0.01)
-		{
-			g_range[channelId] = PICO_X1_PROBE_20MV;
-			g_range_3000a[channelId] = PS3000A_20MV;
-			g_roundedRange[channelId] = 0.02;
-		}
-		else
-		{
-			g_range[channelId] = PICO_X1_PROBE_10MV;
-			g_range_3000a[channelId] = PS3000A_10MV;
-			g_roundedRange[channelId] = 0.01;
-		}
-
-		UpdateChannel(channelId);
-
-		//Update trigger if this is the trigger channel.
-		//Trigger is digital and threshold is specified in ADC counts.
-		//We want to maintain constant trigger level in volts, not ADC counts.
-		if(g_triggerChannel == channelId)
-			UpdateTrigger();
-	}
-
-	else if( (cmd == "RATE") && (args.size() == 1) )
-	{
-		lock_guard<mutex> lock(g_mutex);
-
-		//Convert sample rate to sample period
-		auto rate = stoull(args[0]);
-		g_sampleInterval = 1e15 / rate;
-		double period_ns = 1e9 / rate;
-
-		//Find closest timebase setting
-		double clkdiv = period_ns / 0.2;
-		int timebase;
-		if(period_ns < 5)
-			timebase = round(log(clkdiv)/log(2));
-		else
-			timebase = round(clkdiv) + 4;
-
-		g_timebase = timebase;
-	}
-
-	else if( (cmd == "THRESH") && (args.size() == 1) )
-	{
-		double level = stod(args[0]);
-		int16_t code = round( (level * 32767) / 5.0);
-		g_msoPodThreshold[channelId][laneId] = code;
-
-		LogTrace("Setting MSO pod %zu lane %zu threshold to %f (code %d)\n", channelId, laneId, level, code);
-
-		lock_guard<mutex> lock(g_mutex);
-
-		//Update the pod if currently active
-		if(g_msoPodEnabled[channelId])
-			EnableMsoPod(channelId);
-	}
-
-	else if( (cmd == "DEPTH") && (args.size() == 1) )
-	{
-		lock_guard<mutex> lock(g_mutex);
-		g_memDepth = stoull(args[0]);
-
-		UpdateTrigger();
-	}
-
-	else if( (cmd == "START") || (cmd == "SINGLE") )
-	{
-		lock_guard<mutex> lock(g_mutex);
-
-		if(g_triggerArmed)
-		{
-			LogVerbose("Ignoring START command because trigger is already armed\n");
-			return;
-		}
-
-		//Make sure we've got something to capture
-		bool anyChannels = false;
-		for(size_t i=0; i<g_numChannels; i++)
-		{
-			if(g_channelOn[i])
-			{
-				anyChannels = true;
-				break;
-			}
-		}
-		for(size_t i=0; i<g_numDigitalPods; i++)
-		{
-			if(g_msoPodEnabled[i])
-			{
-				anyChannels = true;
-				break;
-			}
-		}
-
-		if(!anyChannels)
-		{
-			LogVerbose("Ignoring START command because no channels are active\n");
-			return;
-		}
-
-		//Start the capture
-		StartCapture(false);
-		g_triggerOneShot = (cmd == "SINGLE");
-	}
-
-	else if(cmd == "FORCE")
-	{
-		//Clear out any old trigger config
-		if(g_triggerArmed)
-		{
-			Stop();
-			g_triggerArmed = false;
-		}
-
-		UpdateTrigger(true);
-		StartCapture(true, true);
-	}
-
-	else if(cmd == "STOP")
-	{
-		lock_guard<mutex> lock(g_mutex);
-
-		Stop();
-		g_triggerArmed = false;
-	}
-
-	else if(subject == "TRIG")
-	{
-		if( (cmd == "EDGE:DIR") && (args.size() == 1) )
-		{
-			lock_guard<mutex> lock(g_mutex);
-
-			if(args[0] == "RISING")
-				g_triggerDirection = PICO_RISING;
-			else if(args[0] == "FALLING")
-				g_triggerDirection = PICO_FALLING;
-			else if(args[0] == "ANY")
-				g_triggerDirection = PICO_RISING_OR_FALLING;
-
-			UpdateTrigger();
-		}
-
-		else if( (cmd == "LEV") && (args.size() == 1) )
-		{
-			lock_guard<mutex> lock(g_mutex);
-
-			g_triggerVoltage = stof(args[0]);
-			UpdateTrigger();
-		}
-
-		else if( (cmd == "SOU") && (args.size() == 1) )
-		{
-			lock_guard<mutex> lock(g_mutex);
-
-			if(isalpha(args[0][0]))
-			{
-				g_triggerChannel = args[0][0] - 'A';
-				if(!g_channelOn[g_triggerChannel])
-				{
-					LogDebug("Trigger channel wasn't on, enabling it\n");
-					g_channelOn[g_triggerChannel] = true;
-					UpdateChannel(g_triggerChannel);
-				}
-			}
-			else if( (isdigit(args[0][0])) && (args[0].length() == 3) )
-			{
-				int npod = args[0][0] - '1';
-				int nchan = args[0][2] - '0';
-				g_triggerChannel = g_numChannels + npod*8 + nchan;
-
-				if(!g_msoPodEnabled[npod])
-				{
-					LogDebug("Trigger pod wasn't on, enabling it\n");
-					EnableMsoPod(npod);
-				}
-			}
-
-			bool wasOn = g_triggerArmed;
-			Stop();
-
-			UpdateTrigger();
-
-			if(wasOn)
-				StartCapture(false);
-		}
-
-		else if( (cmd == "DELAY") && (args.size() == 1) )
-		{
-			lock_guard<mutex> lock(g_mutex);
-
-			g_triggerDelay = stoull(args[0]);
-			UpdateTrigger();
-		}
-
-		else
-		{
-			LogDebug("Unrecognized trigger command received: %s\n", line.c_str());
-			LogIndenter li;
-			LogDebug("Command: %s\n", cmd.c_str());
-			for(auto arg : args)
-				LogDebug("Arg: %s\n", arg.c_str());
-		}
-	}
-
 	//TODO: bandwidth limiter
 
-	//Unknown
 	else
 	{
 		LogDebug("Unrecognized command received: %s\n", line.c_str());
@@ -843,8 +426,452 @@ void PicoSCPIServer::OnCommand(
 		LogDebug("Command: %s\n", cmd.c_str());
 		for(auto arg : args)
 			LogDebug("Arg: %s\n", arg.c_str());
+		return false;
 	}
 
+	return true;
+}
+
+bool PicoSCPIServer::GetChannelID(const std::string& subject, size_t& id_out)
+{
+	//Extract channel ID from subject and clamp bounds
+	size_t channelId = 0;
+	size_t laneId = 0;
+	bool channelIsDigital = false;
+	if(isalpha(subject[0]))
+	{
+		channelId = min(static_cast<size_t>(subject[0] - 'A'), g_numChannels);
+		channelIsDigital = false;
+	}
+	else if(isdigit(subject[0]))
+	{
+		channelId = min(subject[0] - '0', 2) - 1;
+		channelIsDigital = true;
+		if(subject.length() >= 3)
+			laneId = min(subject[2] - '0', 7);
+	}
+	else
+		return false;
+
+	//Pack channel IDs into bytes
+	//Byte 0: channel / pod ID
+	//Byte 1: lane ID
+	//Byte 2: digital flag
+	id_out = channelId;
+	if(channelIsDigital)
+		id_out |= 0x800000 | (laneId << 8);
+
+	return true;
+}
+
+BridgeSCPIServer::ChannelType PicoSCPIServer::GetChannelType(size_t channel)
+{
+	if(channel > 0xff)
+		return CH_DIGITAL;
+	else
+		return CH_ANALOG;
+
+	//TODO: external trigger
+}
+
+void PicoSCPIServer::AcquisitionStart(bool oneShot)
+{
+	lock_guard<mutex> lock(g_mutex);
+
+	if(g_triggerArmed)
+	{
+		LogVerbose("Ignoring START command because trigger is already armed\n");
+		return;
+	}
+
+	//Make sure we've got something to capture
+	bool anyChannels = false;
+	for(size_t i=0; i<g_numChannels; i++)
+	{
+		if(g_channelOn[i])
+		{
+			anyChannels = true;
+			break;
+		}
+	}
+	for(size_t i=0; i<g_numDigitalPods; i++)
+	{
+		if(g_msoPodEnabled[i])
+		{
+			anyChannels = true;
+			break;
+		}
+	}
+
+	if(!anyChannels)
+	{
+		LogVerbose("Ignoring START command because no channels are active\n");
+		return;
+	}
+
+	//Start the capture
+	StartCapture(false);
+	g_triggerOneShot = oneShot;
+}
+
+void PicoSCPIServer::AcquisitionForceTrigger()
+{
+	lock_guard<mutex> lock(g_mutex);
+
+	//Clear out any old trigger config
+	if(g_triggerArmed)
+	{
+		Stop();
+		g_triggerArmed = false;
+	}
+
+	UpdateTrigger(true);
+	StartCapture(true, true);
+}
+
+void PicoSCPIServer::AcquisitionStop()
+{
+	lock_guard<mutex> lock(g_mutex);
+
+	Stop();
+	g_triggerArmed = false;
+}
+
+void PicoSCPIServer::SetChannelEnabled(size_t chIndex, bool enabled)
+{
+	lock_guard<mutex> lock(g_mutex);
+
+	if(GetChannelType(chIndex) == CH_DIGITAL)
+	{
+		int podIndex = (chIndex & 0xff);
+		PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + podIndex);
+
+		if(enabled)
+		{
+			auto status = ps6000aSetDigitalPortOn(
+				g_hScope,
+				podId,
+				g_msoPodThreshold[podIndex],
+				8,
+				g_msoHysteresis[podIndex]);
+			if(status != PICO_OK)
+				LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
+			else
+				g_msoPodEnabled[podIndex] = true;
+		}
+		else
+		{
+			auto status = ps6000aSetDigitalPortOff(g_hScope, podId);
+			if(status != PICO_OK)
+				LogError("ps6000aSetDigitalPortOff failed with code %x\n", status);
+			else
+				g_msoPodEnabled[podIndex] = false;
+		}
+	}
+	else
+	{
+		int chId = chIndex & 0xff;
+		g_channelOn[chId] = enabled;
+		UpdateChannel(chId);
+	}
+
+	//We need to allocate new buffers for this channel
+	g_memDepthChanged = true;
+}
+
+void PicoSCPIServer::SetAnalogCoupling(size_t chIndex, const std::string& coupling)
+{
+	lock_guard<mutex> lock(g_mutex);
+	int channelId = chIndex & 0xff;
+
+	if(coupling == "DC1M")
+		g_coupling[channelId] = PICO_DC;
+	else if(coupling == "AC1M")
+		g_coupling[channelId] = PICO_AC;
+	else if(coupling == "DC50")
+		g_coupling[channelId] = PICO_DC_50OHM;
+
+	UpdateChannel(channelId);
+}
+
+void PicoSCPIServer::SetAnalogRange(size_t chIndex, double range_V)
+{
+	lock_guard<mutex> lock(g_mutex);
+	size_t channelId = chIndex & 0xff;
+	auto range = range_V;
+
+	//If 50 ohm coupling, cap hardware voltage range to 5V
+	if(g_coupling[channelId] == PICO_DC_50OHM)
+		range = min(range, 5.0);
+
+	if(range > 100 && g_pico_type == PICO6000A)
+	{
+		g_range[channelId] = PICO_X1_PROBE_200V;
+		g_roundedRange[channelId] = 200;
+	}
+	else if(range > 50 && g_pico_type == PICO6000A)
+	{
+		g_range[channelId] = PICO_X1_PROBE_100V;
+		g_roundedRange[channelId] = 100;
+	}
+	else if(range > 20)
+	{
+		g_range[channelId] = PICO_X1_PROBE_50V;
+		g_range_3000a[channelId] = PS3000A_50V;
+		g_roundedRange[channelId] = 50;
+	}
+	else if(range > 10)
+	{
+		g_range[channelId] = PICO_X1_PROBE_20V;
+		g_range_3000a[channelId] = PS3000A_20V;
+		g_roundedRange[channelId] = 20;
+	}
+	else if(range > 5)
+	{
+		g_range[channelId] = PICO_X1_PROBE_10V;
+		g_range_3000a[channelId] = PS3000A_10V;
+		g_roundedRange[channelId] = 10;
+	}
+	else if(range > 2)
+	{
+		g_range[channelId] = PICO_X1_PROBE_5V;
+		g_range_3000a[channelId] = PS3000A_5V;
+		g_roundedRange[channelId] = 5;
+	}
+	else if(range > 1)
+	{
+		g_range[channelId] = PICO_X1_PROBE_2V;
+		g_range_3000a[channelId] = PS3000A_2V;
+		g_roundedRange[channelId] = 2;
+	}
+	else if(range > 0.5)
+	{
+		g_range[channelId] = PICO_X1_PROBE_1V;
+		g_range_3000a[channelId] = PS3000A_1V;
+		g_roundedRange[channelId] = 1;
+	}
+	else if(range > 0.2)
+	{
+		g_range[channelId] = PICO_X1_PROBE_500MV;
+		g_range_3000a[channelId] = PS3000A_500MV;
+		g_roundedRange[channelId] = 0.5;
+	}
+	else if(range > 0.1)
+	{
+		g_range[channelId] = PICO_X1_PROBE_200MV;
+		g_range_3000a[channelId] = PS3000A_200MV;
+		g_roundedRange[channelId] = 0.2;
+	}
+	else if(range >= 0.05)
+	{
+		g_range[channelId] = PICO_X1_PROBE_100MV;
+		g_range_3000a[channelId] = PS3000A_100MV;
+		g_roundedRange[channelId] = 0.1;
+	}
+	else if(range >= 0.02)
+	{
+		g_range[channelId] = PICO_X1_PROBE_50MV;
+		g_range_3000a[channelId] = PS3000A_50MV;
+		g_roundedRange[channelId] = 0.05;
+	}
+	else if(range >= 0.01)
+	{
+		g_range[channelId] = PICO_X1_PROBE_20MV;
+		g_range_3000a[channelId] = PS3000A_20MV;
+		g_roundedRange[channelId] = 0.02;
+	}
+	else
+	{
+		g_range[channelId] = PICO_X1_PROBE_10MV;
+		g_range_3000a[channelId] = PS3000A_10MV;
+		g_roundedRange[channelId] = 0.01;
+	}
+
+	UpdateChannel(channelId);
+
+	//Update trigger if this is the trigger channel.
+	//Trigger is digital and threshold is specified in ADC counts.
+	//We want to maintain constant trigger level in volts, not ADC counts.
+	if(g_triggerChannel == channelId)
+		UpdateTrigger();
+}
+
+void PicoSCPIServer::SetAnalogOffset(size_t chIndex, double offset_V)
+{
+	lock_guard<mutex> lock(g_mutex);
+
+	int channelId = chIndex & 0xff;
+
+	double maxoff;
+	double minoff;
+	float maxoff_f;
+	float minoff_f;
+
+	//Clamp to allowed range
+	switch(g_pico_type) {
+	case PICO3000A:
+		ps3000aGetAnalogueOffset(g_hScope, g_range_3000a[channelId], (PS3000A_COUPLING)g_coupling[channelId], &maxoff_f, &minoff_f);
+		maxoff = maxoff_f;
+		minoff = minoff_f;
+		break;
+	case PICO6000A:
+		ps6000aGetAnalogueOffsetLimits(g_hScope, g_range[channelId], g_coupling[channelId], &maxoff, &minoff);
+		break;
+	}
+	offset_V = min(maxoff, offset_V);
+	offset_V = max(minoff, offset_V);
+
+	g_offset[channelId] = offset_V;
+	UpdateChannel(channelId);
+}
+
+void PicoSCPIServer::SetDigitalThreshold(size_t chIndex, double threshold_V)
+{
+	int channelId = chIndex & 0xff;
+	int laneId = (chIndex >> 8) & 0xff;
+
+	int16_t code = round( (threshold_V * 32767) / 5.0);
+	g_msoPodThreshold[channelId][laneId] = code;
+
+	LogTrace("Setting MSO pod %d lane %d threshold to %f (code %d)\n", channelId, laneId, threshold_V, code);
+
+	lock_guard<mutex> lock(g_mutex);
+
+	//Update the pod if currently active
+	if(g_msoPodEnabled[channelId])
+		EnableMsoPod(channelId);
+}
+
+void PicoSCPIServer::SetDigitalHysteresis(size_t chIndex, double hysteresis)
+{
+	lock_guard<mutex> lock(g_mutex);
+
+	int channelId = chIndex & 0xff;
+
+	//Calculate hysteresis
+	int level = hysteresis;
+	if(level <= 50)
+		g_msoHysteresis[channelId] = PICO_LOW_50MV;
+	else if(level <= 100)
+		g_msoHysteresis[channelId] = PICO_NORMAL_100MV;
+	else if(level <= 200)
+		g_msoHysteresis[channelId] = PICO_HIGH_200MV;
+	else
+		g_msoHysteresis[channelId] = PICO_VERY_HIGH_400MV;
+
+	LogTrace("Setting MSO pod %d hysteresis to %d mV (code %d)\n",
+		channelId, level, g_msoHysteresis[channelId]);
+
+	//Update the pod if currently active
+	if(g_msoPodEnabled[channelId])
+		EnableMsoPod(channelId);
+}
+
+void PicoSCPIServer::SetSampleRate(uint64_t rate_hz)
+{
+	lock_guard<mutex> lock(g_mutex);
+
+	//Convert sample rate to sample period
+	g_sampleInterval = 1e15 / rate_hz;
+	double period_ns = 1e9 / rate_hz;
+
+	//Find closest timebase setting
+	double clkdiv = period_ns / 0.2;
+	int timebase;
+	if(period_ns < 5)
+		timebase = round(log(clkdiv)/log(2));
+	else
+		timebase = round(clkdiv) + 4;
+
+	g_timebase = timebase;
+}
+
+void PicoSCPIServer::SetSampleDepth(uint64_t depth)
+{
+	lock_guard<mutex> lock(g_mutex);
+	g_memDepth = depth;
+
+	UpdateTrigger();
+}
+
+void PicoSCPIServer::SetTriggerDelay(uint64_t delay_fs)
+{
+	lock_guard<mutex> lock(g_mutex);
+
+	g_triggerDelay = delay_fs;
+	UpdateTrigger();
+}
+
+void PicoSCPIServer::SetTriggerSource(size_t chIndex)
+{
+	lock_guard<mutex> lock(g_mutex);
+
+	auto type = GetChannelType(chIndex);
+	switch(type)
+	{
+		case CH_ANALOG:
+			g_triggerChannel = chIndex & 0xff;
+			if(!g_channelOn[g_triggerChannel])
+			{
+				LogDebug("Trigger channel wasn't on, enabling it\n");
+				g_channelOn[g_triggerChannel] = true;
+				UpdateChannel(g_triggerChannel);
+			}
+			break;
+
+		case CH_DIGITAL:
+			{
+				int npod = chIndex & 0xff;
+				int nchan = (chIndex >> 8) & 0xff;
+				g_triggerChannel = g_numChannels + npod*8 + nchan;
+
+				if(!g_msoPodEnabled[npod])
+				{
+					LogDebug("Trigger pod wasn't on, enabling it\n");
+					EnableMsoPod(npod);
+				}
+			}
+			break;
+
+		default:
+			//TODO
+			break;
+	}
+
+	bool wasOn = g_triggerArmed;
+	Stop();
+
+	UpdateTrigger();
+
+	if(wasOn)
+		StartCapture(false);
+}
+
+void PicoSCPIServer::SetTriggerLevel(double level_V)
+{
+	lock_guard<mutex> lock(g_mutex);
+
+	g_triggerVoltage = level_V;
+	UpdateTrigger();
+}
+
+void PicoSCPIServer::SetTriggerTypeEdge()
+{
+	//all triggers are edge, nothing to do here until we start supporting other trigger types
+}
+
+void PicoSCPIServer::SetEdgeTriggerEdge(const string& edge)
+{
+	lock_guard<mutex> lock(g_mutex);
+
+	if(edge == "RISING")
+		g_triggerDirection = PICO_RISING;
+	else if(edge == "FALLING")
+		g_triggerDirection = PICO_FALLING;
+	else if(edge == "ANY")
+		g_triggerDirection = PICO_RISING_OR_FALLING;
+
+	UpdateTrigger();
 }
 
 /**
