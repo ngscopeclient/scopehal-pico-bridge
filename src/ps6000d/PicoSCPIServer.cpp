@@ -307,8 +307,7 @@ vector<size_t> PicoSCPIServer::GetSampleRates()
 		int32_t intervalNs_int;
 		size_t maxSamples;
 		int32_t maxSamples_int;
-		PICO_STATUS status;
-		status = PICO_RESERVED_1;
+		PICO_STATUS status = PICO_RESERVED_1;
 		if(g_pico_type == PICO6000A)
 			status = ps6000aGetTimebase(g_hScope, i, 1, &intervalNs, &maxSamples, 0);
 		else if(g_pico_type == PICO3000A)
@@ -322,6 +321,12 @@ vector<size_t> PicoSCPIServer::GetSampleRates()
 		{
 			size_t intervalFs = intervalNs * 1e6f;
 			rates.push_back(FS_PER_SECOND / intervalFs);
+		}
+		else if(PICO_INVALID_TIMEBASE == status)
+		{
+			//Requested timebase not possible
+			//This is common and harmless if we ask for e.g. timebase 0 when too many channels are active.
+			continue;
 		}
 		else
 			LogWarning("GetTimebase failed, code %d / 0x%x\n", status, status);
