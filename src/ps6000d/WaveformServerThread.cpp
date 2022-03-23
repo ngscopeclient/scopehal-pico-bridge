@@ -83,155 +83,176 @@ void WaveformServerThread()
 			continue;
 		}
 
-		lock_guard<mutex> lock(g_mutex);
-
-		//Stop the trigger
-		PICO_STATUS status = PICO_OPERATION_FAILED;
-		if(g_pico_type == PICO6000A)
-			status = ps6000aStop(g_hScope);
-		else if(g_pico_type == PICO3000A)
-			status = ps3000aStop(g_hScope);
-		if(PICO_OK != status)
-			LogFatal("ps6000aStop failed (code 0x%x)\n", status);
-
-		//Verify it's actually stopped
-
-		//Set up buffers if needed
-		if(g_memDepthChanged || waveformBuffers.empty())
+		size_t interval;
+		map<size_t, bool> channelOn;
+		bool msoPodEnabled[2];
 		{
-			LogTrace("Reallocating buffers\n");
+			lock_guard<mutex> lock(g_mutex);
 
-			//Clear out old buffers
-			for(auto ch : g_channelIDs)
+			interval = g_sampleIntervalDuringArm;
+			channelOn = g_channelOnDuringArm;
+			msoPodEnabled[0] = g_msoPodEnabledDuringArm[0];
+			msoPodEnabled[1] = g_msoPodEnabledDuringArm[1];
+
+			//Stop the trigger
+			PICO_STATUS status = PICO_OPERATION_FAILED;
+			if(g_pico_type == PICO6000A)
+				status = ps6000aStop(g_hScope);
+			else if(g_pico_type == PICO3000A)
+				status = ps3000aStop(g_hScope);
+			if(PICO_OK != status)
+				LogFatal("ps6000aStop failed (code 0x%x)\n", status);
+
+			//Verify it's actually stopped
+
+			//Set up buffers if needed
+			if(g_memDepthChanged || waveformBuffers.empty())
 			{
-				if(g_pico_type == PICO6000A)
-					ps6000aSetDataBuffer(g_hScope, ch, NULL,
-						0, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_CLEAR_ALL);
-				else if(g_pico_type == PICO3000A)
-					ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)ch, NULL,
-						0, 0, PS3000A_RATIO_MODE_NONE);
+				LogTrace("Reallocating buffers\n");
+
+				//Clear out old buffers
+				for(auto ch : g_channelIDs)
+				{
+					if(g_pico_type == PICO6000A)
+						ps6000aSetDataBuffer(g_hScope, ch, NULL,
+							0, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_CLEAR_ALL);
+					else if(g_pico_type == PICO3000A)
+						ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)ch, NULL,
+							0, 0, PS3000A_RATIO_MODE_NONE);
+				}
+
+				//Clear out old buffers
+				for(size_t i=0; i<g_channelIDs.size(); i++)
+				{
+					if(waveformBuffers[i])
+					{
+						delete[] waveformBuffers[i];
+						waveformBuffers[i] = NULL;
+					}
+				}
+
+				//Set up new ones
+				//TODO: Only allocate memory if the channel is actually enabled
+				for(size_t i=0; i<g_channelIDs.size(); i++)
+				{
+					//Allocate memory if needed
+					waveformBuffers[i] = new int16_t[g_captureMemDepth];
+					memset(waveformBuffers[i], 0x00, g_captureMemDepth * sizeof(int16_t));
+
+					//Give it to the scope, removing any other buffer we might have
+					auto ch = g_channelIDs[i];
+					if(g_pico_type == PICO6000A)
+						status = ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)ch, waveformBuffers[i],
+							g_captureMemDepth, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_ADD);
+					else if(g_pico_type == PICO3000A)
+						status = ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)ch, waveformBuffers[i],
+							g_captureMemDepth, 0, PS3000A_RATIO_MODE_NONE);
+					if(status != PICO_OK)
+						LogFatal("psXXXXSetDataBuffer for channel %d failed (code 0x%x)\n", ch, status);
+				}
+
+				g_memDepthChanged = false;
 			}
 
-			//Clear out old buffers
+			//Download the data from the scope
+			numSamples = g_captureMemDepth;
+			numSamples_int = g_captureMemDepth;
+			int16_t overflow = 0;
+			if(g_pico_type == PICO6000A)
+				status = ps6000aGetValues(g_hScope, 0, &numSamples, 1, PICO_RATIO_MODE_RAW, 0, &overflow);
+			else if(g_pico_type == PICO3000A)
+				status = ps3000aGetValues(g_hScope, 0, &numSamples_int, 1, PS3000A_RATIO_MODE_NONE, 0, &overflow);
+			if(status == PICO_NO_SAMPLES_AVAILABLE)
+				continue; // state changed while mutex was unlocked?
+			if(PICO_OK != status)
+				LogFatal("psXXXXGetValues (code 0x%x)\n", status);
+
+			//Figure out how many channels are active in this capture
+			numchans = 0;
+			for(size_t i=0; i<g_numChannels; i++)
+			{
+				if(g_channelOnDuringArm[i])
+					numchans ++;
+			}
+			for(size_t i=0; i<g_numDigitalPods; i++)
+			{
+				if(g_msoPodEnabledDuringArm[i])
+					numchans ++;
+			}
+
+
+		}
+
+		//Do *not* hold mutex while sending data to the client
+		//This can take a long time and we don't want to block the control channel
+		{
+			//Send the channel count to the client
+			if(!client.SendLooped((uint8_t*)&numchans, sizeof(numchans)))
+				break;
+
+			//Send sample rate to the client
+			if(!client.SendLooped((uint8_t*)&interval, sizeof(interval)))
+				break;
+
+			//TODO: send overflow flags to client
+
+			//Interpolate trigger position if we're using an analog level trigger
+			bool triggerIsAnalog = (g_triggerChannel < g_numChannels);
+			float trigphase = 0;
+			if(triggerIsAnalog)
+				trigphase = InterpolateTriggerTime(waveformBuffers[g_triggerChannel]);
+
+			//Send data for each channel to the client
 			for(size_t i=0; i<g_channelIDs.size(); i++)
 			{
-				if(waveformBuffers[i])
+				size_t header[2] = {i, numSamples};
+
+				//Analog channels
+				if((i < g_numChannels) && (channelOn[i]) )
 				{
-					delete[] waveformBuffers[i];
-					waveformBuffers[i] = NULL;
+					//Send channel ID, scale, offset, and memory depth
+					if(!client.SendLooped((uint8_t*)&header, sizeof(header)))
+						break;
+
+					float scale = g_roundedRange[i] / 32512;
+					float offset = g_offsetDuringArm[i];
+					float config[3] = {scale, offset, trigphase};
+					if(!client.SendLooped((uint8_t*)&config, sizeof(config)))
+						break;
+
+					//Send the actual waveform data
+					if(!client.SendLooped((uint8_t*)waveformBuffers[i], numSamples * sizeof(int16_t)))
+						break;
+				}
+
+				//Digital channels
+				else if( (i >= g_numChannels) && (msoPodEnabled[i - g_numChannels]) )
+				{
+					if(!client.SendLooped((uint8_t*)&header, sizeof(header)))
+						break;
+					if(!client.SendLooped((uint8_t*)&trigphase, sizeof(trigphase)))
+						break;
+					if(!client.SendLooped((uint8_t*)waveformBuffers[i], numSamples * sizeof(int16_t)))
+						break;
 				}
 			}
+		}
 
-			//Set up new ones
-			//TODO: Only allocate memory if the channel is actually enabled
-			for(size_t i=0; i<g_channelIDs.size(); i++)
+		//Need mutex here to update global state
+		{
+			lock_guard<mutex> lock(g_mutex);
+
+			//Re-arm the trigger if doing repeating triggers
+			if(g_triggerOneShot)
+				g_triggerArmed = false;
+			else
 			{
-				//Allocate memory if needed
-				waveformBuffers[i] = new int16_t[g_captureMemDepth];
-				memset(waveformBuffers[i], 0x00, g_captureMemDepth * sizeof(int16_t));
+				if(g_captureMemDepth != g_memDepth)
+					g_memDepthChanged = true;
 
-				//Give it to the scope, removing any other buffer we might have
-				auto ch = g_channelIDs[i];
-				if(g_pico_type == PICO6000A)
-					status = ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)ch, waveformBuffers[i],
-						g_captureMemDepth, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_ADD);
-				else if(g_pico_type == PICO3000A)
-					status = ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)ch, waveformBuffers[i],
-						g_captureMemDepth, 0, PS3000A_RATIO_MODE_NONE);
-				if(status != PICO_OK)
-					LogFatal("psXXXXSetDataBuffer for channel %d failed (code 0x%x)\n", ch, status);
+				//Restart
+				StartCapture(false);
 			}
-
-			g_memDepthChanged = false;
-		}
-
-		//Download the data from the scope
-		numSamples = g_captureMemDepth;
-		numSamples_int = g_captureMemDepth;
-		int16_t overflow = 0;
-		if(g_pico_type == PICO6000A)
-			status = ps6000aGetValues(g_hScope, 0, &numSamples, 1, PICO_RATIO_MODE_RAW, 0, &overflow);
-		else if(g_pico_type == PICO3000A)
-			status = ps3000aGetValues(g_hScope, 0, &numSamples_int, 1, PS3000A_RATIO_MODE_NONE, 0, &overflow);
-		if(status == PICO_NO_SAMPLES_AVAILABLE)
-			continue; // state changed while mutex was unlocked?
-		if(PICO_OK != status)
-			LogFatal("psXXXXGetValues (code 0x%x)\n", status);
-
-		//Figure out how many channels are active in this capture
-		numchans = 0;
-		for(size_t i=0; i<g_numChannels; i++)
-		{
-			if(g_channelOnDuringArm[i])
-				numchans ++;
-		}
-		for(size_t i=0; i<g_numDigitalPods; i++)
-		{
-			if(g_msoPodEnabledDuringArm[i])
-				numchans ++;
-		}
-
-		//Send the channel count to the client
-		if(!client.SendLooped((uint8_t*)&numchans, sizeof(numchans)))
-			break;
-
-		//Send sample rate to the client
-		if(!client.SendLooped((uint8_t*)&g_sampleIntervalDuringArm, sizeof(g_sampleIntervalDuringArm)))
-			break;
-
-		//TODO: send overflow flags to client
-
-		//Interpolate trigger position if we're using an analog level trigger
-		bool triggerIsAnalog = (g_triggerChannel < g_numChannels);
-		float trigphase = 0;
-		if(triggerIsAnalog)
-			trigphase = InterpolateTriggerTime(waveformBuffers[g_triggerChannel]);
-
-		//Send data for each channel to the client
-		for(size_t i=0; i<g_channelIDs.size(); i++)
-		{
-			size_t header[2] = {i, numSamples};
-
-			//Analog channels
-			if((i < g_numChannels) && (g_channelOnDuringArm[i]) )
-			{
-				//Send channel ID, scale, offset, and memory depth
-				if(!client.SendLooped((uint8_t*)&header, sizeof(header)))
-					break;
-
-				float scale = g_roundedRange[i] / 32512;
-				float offset = g_offsetDuringArm[i];
-				float config[3] = {scale, offset, trigphase};
-				if(!client.SendLooped((uint8_t*)&config, sizeof(config)))
-					break;
-
-				//Send the actual waveform data
-				if(!client.SendLooped((uint8_t*)waveformBuffers[i], numSamples * sizeof(int16_t)))
-					break;
-			}
-
-			//Digital channels
-			else if( (i >= g_numChannels) && (g_msoPodEnabledDuringArm[i - g_numChannels]) )
-			{
-				if(!client.SendLooped((uint8_t*)&header, sizeof(header)))
-					break;
-				if(!client.SendLooped((uint8_t*)&trigphase, sizeof(trigphase)))
-					break;
-				if(!client.SendLooped((uint8_t*)waveformBuffers[i], numSamples * sizeof(int16_t)))
-					break;
-			}
-		}
-
-		//Re-arm the trigger if doing repeating triggers
-		if(g_triggerOneShot)
-			g_triggerArmed = false;
-		else
-		{
-			if(g_captureMemDepth != g_memDepth)
-				g_memDepthChanged = true;
-
-			//Restart
-			StartCapture(false);
 		}
 	}
 
