@@ -106,8 +106,28 @@
 		TRIG:SOU [chan]
 			Selects the channel as the trigger source
 
-
 		TODO: SetDigitalPortInteractionCallback to determine when pods are connected/removed
+
+		AWG:DUTY [duty cycle]
+			Sets duty cycle of function generator output
+
+		AWG:FREQ [freq]
+			Sets function generator frequency, in Hz
+
+		AWG:OFF [offset]
+			Sets offset of the function generator output
+
+		AWG:RANGE [range]
+			Sets p-p voltage of the function generator output
+
+		AWG:SHAPE [waveform type]
+			Sets waveform type
+
+		AWG:START
+			Starts the function generator
+
+		AWG:STOP
+			Stops the function generator
  */
 
 #include "ps6000d.h"
@@ -163,6 +183,12 @@ bool g_lastTriggerWasForced = false;
 
 std::mutex g_mutex;
 
+//AWG config
+float g_awgRange = 0;
+float g_awgOffset = 0;
+bool g_awgOn = false;
+double g_awgFreq = 1000;
+void ReconfigAWG();
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Construction / destruction
@@ -382,7 +408,113 @@ bool PicoSCPIServer::OnCommand(
 		const string& cmd,
 		const vector<string>& args)
 {
-	if(BridgeSCPIServer::OnCommand(line, subject, cmd, args))
+	//Function generator is different from normal channels
+	//(uses range/offs commands so must go before normal bridge processing!)
+	if(subject == "AWG")
+	{
+		if(cmd == "START")
+		{
+			lock_guard<mutex> lock(g_mutex);
+			g_awgOn = true;
+			ReconfigAWG();
+		}
+
+		else if(cmd == "STOP")
+		{
+			lock_guard<mutex> lock(g_mutex);
+			g_awgOn = false;
+			ReconfigAWG();
+		}
+
+		else if(args.size() == 1)
+		{
+			if(cmd == "FREQ")
+			{
+				lock_guard<mutex> lock(g_mutex);
+				g_awgFreq = stof(args[0]);
+				auto status = ps6000aSigGenFrequency(g_hScope, g_awgFreq);
+				if(status != PICO_OK)
+					LogError("ps6000aSigGenFrequency failed, code 0x%x (freq=%f)\n", status, g_awgFreq);
+
+				ReconfigAWG();
+			}
+
+			else if(cmd == "DUTY")
+			{
+				lock_guard<mutex> lock(g_mutex);
+				auto duty = stof(args[0]) * 100;
+				auto status = ps6000aSigGenWaveformDutyCycle(g_hScope, duty);
+				if(status != PICO_OK)
+					LogError("ps6000aSigGenWaveformDutyCycle failed, code 0x%x\n", status);
+
+				ReconfigAWG();
+			}
+
+			else if(cmd == "OFFS")
+			{
+				lock_guard<mutex> lock(g_mutex);
+				g_awgOffset = stof(args[0]);
+
+				ReconfigAWG();
+			}
+
+			else if(cmd == "RANGE")
+			{
+				lock_guard<mutex> lock(g_mutex);
+				g_awgRange = stof(args[0]);
+
+				ReconfigAWG();
+			}
+
+			else if(cmd == "SHAPE")
+			{
+				lock_guard<mutex> lock(g_mutex);
+
+				PICO_WAVE_TYPE type = PICO_SINE;
+				if(args[0] == "SINE")
+					type = PICO_SINE;
+				else if(args[0] == "SQUARE")
+					type = PICO_SQUARE;
+				else if(args[0] == "TRIANGLE")
+					type = PICO_TRIANGLE;
+				else if(args[0] == "RAMP_UP")
+					type = PICO_RAMP_UP;
+				else if(args[0] == "RAMP_DOWN")
+					type = PICO_RAMP_DOWN;
+				else if(args[0] == "SINC")
+					type = PICO_SINC;
+				else if(args[0] == "GAUSSIAN")
+					type = PICO_GAUSSIAN;
+				else if(args[0] == "HALF_SINE")
+					type = PICO_HALF_SINE;
+				else if(args[0] == "DC")
+					type = PICO_DC_VOLTAGE;
+				//PICO_PWM is in header file but doesn't seem to be implemented
+				else if(args[0] == "WHITENOISE")
+					type = PICO_WHITENOISE;
+				else if(args[0] == "PRBS")			//TODO: what polynomial etc?
+					type = PICO_PRBS;
+				else if(args[0] == "ARBITRARY")		//TODO: specify arb buffer
+					type = PICO_ARBITRARY;
+
+				//Set waveform type
+				auto status = ps6000aSigGenWaveform(g_hScope, type, NULL, 0);
+				if(PICO_OK != status)
+					LogError("ps6000aSigGenWaveform failed, code 0x%x\n", status);
+
+				ReconfigAWG();
+			}
+
+			else
+				LogError("Unrecognized AWG command %s\n", line.c_str());
+		}
+
+		else
+			LogError("Unrecognized AWG command %s\n", line.c_str());
+	}
+
+
+	else if(BridgeSCPIServer::OnCommand(line, subject, cmd, args))
 		return true;
 
 	else if( (cmd == "BITS") && (args.size() == 1) )
@@ -398,7 +530,7 @@ bool PicoSCPIServer::OnCommand(
 		//will invalidate the existing buffers and make ps6000aGetValues() fail with PICO_BUFFERS_NOT_SET.
 		g_memDepthChanged = true;
 
-		int bits = stoi(args[0].c_str());
+		int bits = stoi(args[0]);
 		switch(bits)
 		{
 			case 8:
@@ -435,6 +567,33 @@ bool PicoSCPIServer::OnCommand(
 	}
 
 	return true;
+}
+
+/**
+	@brief Reconfigures the function generator
+ */
+void PicoSCPIServer::ReconfigAWG()
+{
+	auto status = ps6000aSigGenRange(g_hScope, g_awgRange, g_awgOffset);
+	if(PICO_OK != status)
+		LogError("ps6000aSigGenRange failed, code 0x%x\n", status);
+
+	double freq = g_awgFreq;
+	double inc = 0;
+	double dwell = 0;
+	status = ps6000aSigGenApply(
+		g_hScope,
+		g_awgOn,
+		false,		//sweep enable
+		false,		//trigger enable
+		true,		//automatic DDS sample frequency
+		false,		//do not override clock and prescale
+		&freq,
+		&freq,
+		&inc,
+		&dwell);
+	if(PICO_OK != status)
+		LogError("ps6000aSigGenApply failed, code 0x%x\n", status);
 }
 
 bool PicoSCPIServer::GetChannelID(const std::string& subject, size_t& id_out)

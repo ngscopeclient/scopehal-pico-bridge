@@ -70,6 +70,8 @@ protected:
 	virtual bool GetChannelID(const std::string& subject, size_t& id_out);
 	virtual ChannelType GetChannelType(size_t channel);
 
+	void ReconfigAWG();
+
 	//Command methods
 	virtual void AcquisitionStart(bool oneShot = false);
 	virtual void AcquisitionForceTrigger();
