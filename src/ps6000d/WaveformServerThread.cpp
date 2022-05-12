@@ -57,6 +57,7 @@ void WaveformServerThread()
 		LogWarning("Failed to disable Nagle on socket, performance may be poor\n");
 
 	//Set up channel IDs
+	g_channelIDs.clear();
 	for(size_t i=0; i<g_numChannels; i++)
 		g_channelIDs.push_back((PICO_CHANNEL)i);
 	for(size_t i=0; i<g_numDigitalPods; i++)
@@ -254,6 +255,12 @@ void WaveformServerThread()
 				StartCapture(false);
 			}
 		}
+	}
+
+	LogDebug("Client disconnected from data plane socket\n");
+	{
+		lock_guard<mutex> lock(g_mutex);
+		Stop();
 	}
 
 	//Clean up temporary buffers

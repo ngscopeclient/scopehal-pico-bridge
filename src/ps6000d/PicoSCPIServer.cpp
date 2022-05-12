@@ -204,7 +204,7 @@ PicoSCPIServer::~PicoSCPIServer()
 	LogVerbose("Client disconnected\n");
 
 	//Disable all channels when a client disconnects to put the scope in a "safe" state
-	for(auto it : g_channelOn)
+	for(auto& it : g_channelOn)
 	{
 		switch(g_pico_type)
 		{
@@ -215,6 +215,9 @@ PicoSCPIServer::~PicoSCPIServer()
 			ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)it.first);
 			break;
 		}
+
+		it.second = false;
+		g_channelOnDuringArm[it.first] = false;
 	}
 	if(g_pico_type == PICO6000A)
 	{
@@ -492,7 +495,7 @@ bool PicoSCPIServer::OnCommand(
 				//PICO_PWM is in header file but doesn't seem to be implemented
 				else if(args[0] == "WHITENOISE")
 					type = PICO_WHITENOISE;
-				else if(args[0] == "PRBS")			//TODO: what polynomial etc?
+				else if(args[0] == "PRBS")			//custom 42-bit LFSR, not standard polynomial
 					type = PICO_PRBS;
 				else if(args[0] == "ARBITRARY")		//TODO: specify arb buffer
 					type = PICO_ARBITRARY;
