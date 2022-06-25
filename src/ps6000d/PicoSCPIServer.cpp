@@ -948,7 +948,7 @@ void PicoSCPIServer::SetSampleRate(uint64_t rate_hz)
 	if(period_ns < 5)
 		timebase = round(log(clkdiv)/log(2));
 	else
-		timebase = round(clkdiv) + 4;
+		timebase = round(clkdiv/32) + 4;
 
 	g_timebase = timebase;
 }
