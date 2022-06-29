@@ -196,7 +196,9 @@ void ReconfigAWG();
 PicoSCPIServer::PicoSCPIServer(ZSOCKET sock)
 	: BridgeSCPIServer(sock)
 {
-
+	//external trigger is fixed range of -1 to +1V
+	g_roundedRange[PICO_TRIGGER_AUX] = 2;
+	g_offset[PICO_TRIGGER_AUX] = 0;
 }
 
 PicoSCPIServer::~PicoSCPIServer()
@@ -601,6 +603,12 @@ void PicoSCPIServer::ReconfigAWG()
 
 bool PicoSCPIServer::GetChannelID(const std::string& subject, size_t& id_out)
 {
+	if(subject == "EX")
+	{
+		id_out = PICO_TRIGGER_AUX;
+		return true;
+	}
+
 	//Extract channel ID from subject and clamp bounds
 	size_t channelId = 0;
 	size_t laneId = 0;
@@ -633,12 +641,12 @@ bool PicoSCPIServer::GetChannelID(const std::string& subject, size_t& id_out)
 
 BridgeSCPIServer::ChannelType PicoSCPIServer::GetChannelType(size_t channel)
 {
-	if(channel > 0xff)
+	if(channel == PICO_TRIGGER_AUX)
+		return CH_EXTERNAL_TRIGGER;
+	else if(channel > 0xff)
 		return CH_DIGITAL;
 	else
 		return CH_ANALOG;
-
-	//TODO: external trigger
 }
 
 void PicoSCPIServer::AcquisitionStart(bool oneShot)
@@ -1000,6 +1008,12 @@ void PicoSCPIServer::SetTriggerSource(size_t chIndex)
 			}
 			break;
 
+		case CH_EXTERNAL_TRIGGER:
+			{
+				g_triggerChannel = PICO_TRIGGER_AUX;
+				UpdateTrigger();
+			};
+
 		default:
 			//TODO
 			break;
@@ -1088,7 +1102,7 @@ void UpdateTrigger(bool force)
 	else
 		g_lastTriggerWasForced = false;
 
-	bool triggerIsAnalog = (g_triggerChannel < g_numChannels);
+	bool triggerIsAnalog = (g_triggerChannel < g_numChannels) || (g_triggerChannel == PICO_TRIGGER_AUX);
 
 	//Convert threshold from volts to ADC counts
 	float offset = 0;
@@ -1102,7 +1116,6 @@ void UpdateTrigger(bool force)
 			scale = 1;
 	}
 	float trig_code = (g_triggerVoltage - offset) / scale;
-	//LogDebug("UpdateTrigger: trig_code = %.0f for %f V, scale=%f\n", round(trig_code), g_triggerVoltage, scale);
 
 	//This can happen early on during initialization.
 	//Bail rather than dividing by zero.
@@ -1129,9 +1142,13 @@ void UpdateTrigger(bool force)
 			break;
 
 		case PICO6000A:
-			if(g_triggerChannel < g_numChannels)
+			if( (g_triggerChannel < g_numChannels) || (g_triggerChannel == PICO_TRIGGER_AUX) )
 			{
-				ps6000aSetSimpleTrigger(
+				//Seems external trigger only supports zero crossing???
+				if(g_triggerChannel == PICO_TRIGGER_AUX)
+					trig_code = 0;
+
+				int ret = ps6000aSetSimpleTrigger(
 					g_hScope,
 					1,
 					(PICO_CHANNEL)g_triggerChannel,
@@ -1139,6 +1156,8 @@ void UpdateTrigger(bool force)
 					g_triggerDirection,
 					delay,
 					timeout);
+				if(ret != PICO_OK)
+					LogError("ps6000aSetSimpleTrigger failed: %x\n", ret);
 			}
 			else
 			{
