@@ -1041,6 +1041,11 @@ void PicoSCPIServer::SetTriggerTypeEdge()
 	//all triggers are edge, nothing to do here until we start supporting other trigger types
 }
 
+bool PicoSCPIServer::IsTriggerArmed()
+{
+	return g_triggerArmed;
+}
+
 void PicoSCPIServer::SetEdgeTriggerEdge(const string& edge)
 {
 	lock_guard<mutex> lock(g_mutex);
@@ -1142,12 +1147,74 @@ void UpdateTrigger(bool force)
 			break;
 
 		case PICO6000A:
-			if( (g_triggerChannel < g_numChannels) || (g_triggerChannel == PICO_TRIGGER_AUX) )
+			if(g_triggerChannel == PICO_TRIGGER_AUX)
 			{
+				/*
 				//Seems external trigger only supports zero crossing???
-				if(g_triggerChannel == PICO_TRIGGER_AUX)
-					trig_code = 0;
+				trig_code = 0;
 
+				//Remove old trigger conditions
+				ps6000aSetTriggerChannelConditions(
+					g_hScope,
+					NULL,
+					0,
+					PICO_CLEAR_ALL);
+
+				//Set up new conditions
+				PICO_CONDITION cond;
+				cond.source = PICO_TRIGGER_AUX;
+				cond.condition = PICO_CONDITION_TRUE;
+				int ret = ps6000aSetTriggerChannelConditions(
+					g_hScope,
+					&cond,
+					1,
+					PICO_ADD);
+				if(ret != PICO_OK)
+					LogError("ps6000aSetTriggerChannelConditions failed: %x\n", ret);
+
+				PICO_DIRECTION dir;
+				dir.channel = PICO_TRIGGER_AUX;
+				dir.direction = PICO_RISING;
+				dir.thresholdMode = PICO_LEVEL;
+				ret = ps6000aSetTriggerChannelDirections(
+					g_hScope,
+					&dir,
+					1);
+				if(ret != PICO_OK)
+					LogError("ps6000aSetTriggerChannelDirections failed: %x\n", ret);
+
+				PICO_TRIGGER_CHANNEL_PROPERTIES prop;
+				prop.thresholdUpper = trig_code;
+				prop.thresholdUpperHysteresis = 32;
+				prop.thresholdLower = 0;
+				prop.thresholdLowerHysteresis = 0;
+				prop.channel = PICO_TRIGGER_AUX;
+				ret = ps6000aSetTriggerChannelProperties(
+					g_hScope,
+					&prop,
+					1,
+					0,
+					0);
+				if(ret != PICO_OK)
+					LogError("ps6000aSetTriggerChannelProperties failed: %x\n", ret);
+
+				if(force)
+					LogWarning("Force trigger doesn't currently work if trigger source is external\n");
+				*/
+
+				int ret = ps6000aSetSimpleTrigger(
+					g_hScope,
+					1,
+					PICO_TRIGGER_AUX,
+					0,
+					g_triggerDirection,
+					delay,
+					timeout);
+				if(ret != PICO_OK)
+					LogError("ps6000aSetSimpleTrigger failed: %x\n", ret);
+			}
+			else if(g_triggerChannel < g_numChannels)
+			{
 				int ret = ps6000aSetSimpleTrigger(
 					g_hScope,
 					1,
