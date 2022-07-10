@@ -281,12 +281,13 @@ bool PicoSCPIServer::OnQuery(
 				auto status = ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 1, g_msoPodThreshold[channelId][0]);
 				if(status == PICO_OK)
 				{
-					// The pod is here. If we don't need it on, shut it back off			
+					// The pod is here. If we don't need it on, shut it back off
 					if(!g_msoPodEnabled[channelId])
 						ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 0, 0);
 
 					SendReply("1");
-				} else
+				}
+				else
 				{
 					SendReply("0");
 				}
@@ -308,9 +309,10 @@ bool PicoSCPIServer::OnQuery(
 				if(status == PICO_NO_MSO_POD_CONNECTED)
 				{
 					SendReply("0");
-				} else
+				}
+				else
 				{
-					// The pod is here. If we don't need it on, shut it back off			
+					// The pod is here. If we don't need it on, shut it back off
 					if(!g_msoPodEnabled[channelId])
 						ps6000aSetDigitalPortOff(g_hScope, podId);
 
@@ -319,7 +321,8 @@ bool PicoSCPIServer::OnQuery(
 			}
 			break;
 		}
-	} else
+	}
+	else
 	{
 		LogDebug("Unrecognized query received: %s\n", line.c_str());
 	}
@@ -615,16 +618,12 @@ bool PicoSCPIServer::OnCommand(
 					break;
 				}					
 			}
-
 			else
 				LogError("Unrecognized AWG command %s\n", line.c_str());
 		}
-
 		else
 			LogError("Unrecognized AWG command %s\n", line.c_str());
 	}
-
-
 	else if(BridgeSCPIServer::OnCommand(line, subject, cmd, args))
 		return true;
 
@@ -663,9 +662,7 @@ bool PicoSCPIServer::OnCommand(
 		if(g_triggerArmed)
 			StartCapture(false);
 	}
-
 	//TODO: bandwidth limiter
-
 	else
 	{
 		LogDebug("Unrecognized command received: %s\n", line.c_str());
