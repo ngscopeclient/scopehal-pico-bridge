@@ -1595,7 +1595,7 @@ PICO_STATUS StartInternal()
 {
 	//Calculate pre/post trigger time configuration based on trigger delay
 	int64_t triggerDelaySamples = g_triggerDelay / g_sampleInterval;
-	size_t nPreTrigger = min(max(triggerDelaySamples, 0L), (int64_t)g_memDepth);
+	size_t nPreTrigger = min(max(triggerDelaySamples, (int64_t)0L), (int64_t)g_memDepth);
 	size_t nPostTrigger = g_memDepth - nPreTrigger;
 	g_triggerSampleIndex = nPreTrigger;
 
