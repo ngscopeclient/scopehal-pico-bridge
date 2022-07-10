@@ -1122,18 +1122,48 @@ void PicoSCPIServer::SetDigitalHysteresis(size_t chIndex, double hysteresis)
 void PicoSCPIServer::SetSampleRate(uint64_t rate_hz)
 {
 	lock_guard<mutex> lock(g_mutex);
-
-	//Convert sample rate to sample period
-	g_sampleInterval = 1e15 / rate_hz;
-	double period_ns = 1e9 / rate_hz;
-
-	//Find closest timebase setting
-	double clkdiv = period_ns / 0.2;
 	int timebase;
-	if(period_ns < 5)
-		timebase = round(log(clkdiv)/log(2));
-	else
-		timebase = round(clkdiv/32) + 4;
+	double period_ns;
+
+	switch(g_pico_type) {
+		case PICO3000A:
+		{
+			//Convert sample rate to sample period
+			g_sampleInterval = 1e15 / rate_hz;
+			period_ns = 1e9 / rate_hz;
+
+			//Find closest timebase setting
+			double clkdiv = period_ns;
+			if(period_ns < 1)
+				timebase = 0;
+			else
+				timebase = round(log(clkdiv)/log(2));
+		}
+		break;
+
+		case PICO6000A:
+		{
+			//Convert sample rate to sample period
+			g_sampleInterval = 1e15 / rate_hz;
+			period_ns = 1e9 / rate_hz;
+
+			//Find closest timebase setting
+			double clkdiv = period_ns / 0.2;
+			if(period_ns < 5)
+				timebase = round(log(clkdiv)/log(2));
+			else
+				timebase = round(clkdiv/32) + 4;	
+		}
+		break;
+		
+		default: /* Unknown Pico Type */
+		{
+			
+			g_sampleInterval = 1e15 / rate_hz;
+			timebase = 0;
+			LogError("SetSampleRate Error unknown g_pico_type\n");
+		}
+	}
 
 	g_timebase = timebase;
 }
