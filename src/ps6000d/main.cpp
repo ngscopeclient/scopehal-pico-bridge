@@ -142,7 +142,7 @@ int main(int argc, char* argv[])
 			LogNotice("Switching to USB power...\n");
 			status = ps3000aChangePowerSource(g_hScope, PICO_POWER_SUPPLY_NOT_CONNECTED);
 		}
-	        if(PICO_OK != status)
+		if(PICO_OK != status)
 		{
 			LogError("Failed to open unit (code %d)\n", status);
 			return 1;
@@ -247,7 +247,7 @@ int main(int argc, char* argv[])
 	//Initial channel state setup
 	for(size_t i=0; i<g_numChannels; i++)
 	{
-		switch (g_pico_type)
+		switch(g_pico_type)
 		{
 		case PICO3000A:
 			ps3000aSetChannel(g_hScope, (PS3000A_CHANNEL)i, 0, PS3000A_DC, PS3000A_1V, 0.0f);
@@ -271,15 +271,30 @@ int main(int argc, char* argv[])
 	}
 
 	//Figure out digital channel configuration
-	switch (g_pico_type)
+	switch(g_pico_type)
 	{
 	case PICO3000A:
-	case PICO6000A:	
+		/* Model 3abcdMSO with
+			a=4 chan, b=0(unknown) c=6(bandwidth 6=200MHz) d=D(revision D)
+			MSO if MSO option is available 
+			example 3406DMSO (full option)
+		*/
+		if(g_model.find("MSO") > 0)
+		{
+			g_numDigitalPods = 2;
+		} else {
+			g_numDigitalPods = 0;
+		}
+		break;
+
+	case PICO6000A:
 		g_numDigitalPods = 2;
 		break;
+
 	default:
 		g_numDigitalPods = 0;
 	}
+
 	for(size_t i=0; i<g_numDigitalPods; i++)
 	{
 		g_msoPodEnabled[i] = false;
@@ -328,7 +343,7 @@ int main(int argc, char* argv[])
 	}
 
 	//Done
-	switch (g_pico_type)
+	switch(g_pico_type)
 	{
 	case PICO3000A:
 		ps3000aCloseUnit(g_hScope);
@@ -337,6 +352,7 @@ int main(int argc, char* argv[])
 		ps6000aCloseUnit(g_hScope);
 		break;
 	}
+
 	return 0;
 }
 
@@ -344,23 +360,10 @@ int main(int argc, char* argv[])
 BOOL WINAPI OnQuit(DWORD signal)
 {
 	(void)signal;
-	LogNotice("Shutting down...\n");
-
-	lock_guard<mutex> lock(g_mutex);
-	switch (g_pico_type)
-	{
-	case PICO3000A:
-		ps3000aCloseUnit(g_hScope);
-		break;
-	case PICO6000A:
-		ps6000aCloseUnit(g_hScope);
-		break;
-	}	
-	exit(0);
-}
 #else
 void OnQuit(int /*signal*/)
 {
+#endif
 	LogNotice("Shutting down...\n");
 
 	lock_guard<mutex> lock(g_mutex);
@@ -375,4 +378,4 @@ void OnQuit(int /*signal*/)
 	}	
 	exit(0);
 }
-#endif
+
