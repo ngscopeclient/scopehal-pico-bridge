@@ -77,7 +77,11 @@ size_t g_numChannels = 0;
 Socket g_scpiSocket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
 Socket g_dataSocket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
 
+#ifdef _WIN32
+BOOL WINAPI OnQuit(DWORD signal);
+#else
 void OnQuit(int signal);
+#endif
 
 int main(int argc, char* argv[])
 {
@@ -267,10 +271,15 @@ int main(int argc, char* argv[])
 	}
 
 	//Figure out digital channel configuration
-	if(g_pico_type == PICO6000A)
+	switch (g_pico_type)
+	{
+	case PICO3000A:
+	case PICO6000A:	
 		g_numDigitalPods = 2;
-	else
+		break;
+	default:
 		g_numDigitalPods = 0;
+	}
 	for(size_t i=0; i<g_numDigitalPods; i++)
 	{
 		g_msoPodEnabled[i] = false;
@@ -283,8 +292,12 @@ int main(int argc, char* argv[])
 	UpdateTrigger();
 
 	//Set up signal handlers
+#ifdef _WIN32
+	SetConsoleCtrlHandler(OnQuit, TRUE);	
+#else
 	signal(SIGINT, OnQuit);
 	signal(SIGPIPE, SIG_IGN);
+#endif
 
 	//Configure the data plane socket
 	g_dataSocket.Bind(waveform_port);
@@ -315,15 +328,51 @@ int main(int argc, char* argv[])
 	}
 
 	//Done
-	ps6000aCloseUnit(g_hScope);
+	switch (g_pico_type)
+	{
+	case PICO3000A:
+		ps3000aCloseUnit(g_hScope);
+		break;
+	case PICO6000A:
+		ps6000aCloseUnit(g_hScope);
+		break;
+	}
 	return 0;
 }
 
+#ifdef _WIN32
+BOOL WINAPI OnQuit(DWORD signal)
+{
+	(void)signal;
+	LogNotice("Shutting down...\n");
+
+	lock_guard<mutex> lock(g_mutex);
+	switch (g_pico_type)
+	{
+	case PICO3000A:
+		ps3000aCloseUnit(g_hScope);
+		break;
+	case PICO6000A:
+		ps6000aCloseUnit(g_hScope);
+		break;
+	}	
+	exit(0);
+}
+#else
 void OnQuit(int /*signal*/)
 {
 	LogNotice("Shutting down...\n");
 
 	lock_guard<mutex> lock(g_mutex);
-	ps6000aCloseUnit(g_hScope);
+	switch (g_pico_type)
+	{
+	case PICO3000A:
+		ps3000aCloseUnit(g_hScope);
+		break;
+	case PICO6000A:
+		ps6000aCloseUnit(g_hScope);
+		break;
+	}	
 	exit(0);
 }
+#endif
