@@ -251,12 +251,12 @@ int main(int argc, char* argv[])
 	{
 		switch(g_pico_type)
 		{
-		case PICO3000A:
-			ps3000aSetChannel(g_hScope, (PS3000A_CHANNEL)i, 0, PS3000A_DC, PS3000A_1V, 0.0f);
-			break;
-		case PICO6000A:
-			ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)i);
-			break;
+			case PICO3000A:
+				ps3000aSetChannel(g_hScope, (PS3000A_CHANNEL)i, 0, PS3000A_DC, PS3000A_1V, 0.0f);
+				break;
+			case PICO6000A:
+				ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)i);
+				break;
 		}
 	}
 
@@ -275,28 +275,28 @@ int main(int argc, char* argv[])
 	//Figure out digital channel configuration
 	switch(g_pico_type)
 	{
-	case PICO3000A:
-		/* Model 3abcdMSO with
-			a=4 chan, b=0(unknown) c=6(bandwidth 6=200MHz) d=D(revision D)
-			MSO if MSO option is available
-			example 3406DMSO (full option)
-		*/
-		if(g_model.find("MSO") > 0)
-		{
+		case PICO3000A:
+			/* Model 3abcdMSO with
+				a=4 chan, b=0(unknown) c=6(bandwidth 6=200MHz) d=D(revision D)
+				MSO if MSO option is available
+				example 3406DMSO (full option)
+			*/
+			if(g_model.find("MSO") > 0)
+			{
+				g_numDigitalPods = 2;
+			}
+			else
+			{
+				g_numDigitalPods = 0;
+			}
+			break;
+
+		case PICO6000A:
 			g_numDigitalPods = 2;
-		}
-		else
-		{
+			break;
+
+		default:
 			g_numDigitalPods = 0;
-		}
-		break;
-
-	case PICO6000A:
-		g_numDigitalPods = 2;
-		break;
-
-	default:
-		g_numDigitalPods = 0;
 	}
 
 	for(size_t i=0; i<g_numDigitalPods; i++)
@@ -349,12 +349,12 @@ int main(int argc, char* argv[])
 	//Done
 	switch(g_pico_type)
 	{
-	case PICO3000A:
-		ps3000aCloseUnit(g_hScope);
-		break;
-	case PICO6000A:
-		ps6000aCloseUnit(g_hScope);
-		break;
+		case PICO3000A:
+			ps3000aCloseUnit(g_hScope);
+			break;
+		case PICO6000A:
+			ps6000aCloseUnit(g_hScope);
+			break;
 	}
 
 	return 0;
@@ -373,12 +373,12 @@ void OnQuit(int /*signal*/)
 	lock_guard<mutex> lock(g_mutex);
 	switch (g_pico_type)
 	{
-	case PICO3000A:
-		ps3000aCloseUnit(g_hScope);
-		break;
-	case PICO6000A:
-		ps6000aCloseUnit(g_hScope);
-		break;
+		case PICO3000A:
+			ps3000aCloseUnit(g_hScope);
+			break;
+		case PICO6000A:
+			ps6000aCloseUnit(g_hScope);
+			break;
 	}
 	exit(0);
 }
