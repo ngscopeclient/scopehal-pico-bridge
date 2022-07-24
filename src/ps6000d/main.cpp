@@ -46,24 +46,24 @@ void help();
 void help()
 {
 	fprintf(stderr,
-	        "ps6000d [general options] [logger options]\n"
-	        "\n"
-	        "  [general options]:\n"
-	        "    --help                        : this message...\n"
-	        "    --scpi-port port              : specifies the SCPI control plane port (default 5025)\n"
-	        "    --waveform-port port          : specifies the binary waveform data port (default 5026)\n"
-	        "\n"
-	        "  [logger options]:\n"
-	        "    levels: ERROR, WARNING, NOTICE, VERBOSE, DEBUG\n"
-	        "    --quiet|-q                    : reduce logging level by one step\n"
-	        "    --verbose                     : set logging level to VERBOSE\n"
-	        "    --debug                       : set logging level to DEBUG\n"
-	        "    --trace <classname>|          : name of class with tracing messages. (Only relevant when logging level is DEBUG.)\n"
-	        "            <classname::function>\n"
-	        "    --logfile|-l <filename>       : output log messages to file\n"
-	        "    --logfile-lines|-L <filename> : output log messages to file, with line buffering\n"
-	        "    --stdout-only                 : writes errors/warnings to stdout instead of stderr\n"
-	       );
+			"ps6000d [general options] [logger options]\n"
+			"\n"
+			"  [general options]:\n"
+			"    --help                        : this message...\n"
+			"    --scpi-port port              : specifies the SCPI control plane port (default 5025)\n"
+			"    --waveform-port port          : specifies the binary waveform data port (default 5026)\n"
+			"\n"
+			"  [logger options]:\n"
+			"    levels: ERROR, WARNING, NOTICE, VERBOSE, DEBUG\n"
+			"    --quiet|-q                    : reduce logging level by one step\n"
+			"    --verbose                     : set logging level to VERBOSE\n"
+			"    --debug                       : set logging level to DEBUG\n"
+			"    --trace <classname>|          : name of class with tracing messages. (Only relevant when logging level is DEBUG.)\n"
+			"            <classname::function>\n"
+			"    --logfile|-l <filename>       : output log messages to file\n"
+			"    --logfile-lines|-L <filename> : output log messages to file, with line buffering\n"
+			"    --stdout-only                 : writes errors/warnings to stdout instead of stderr\n"
+		   );
 }
 
 string g_model;
