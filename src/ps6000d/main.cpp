@@ -63,7 +63,7 @@ void help()
 			"    --logfile|-l <filename>       : output log messages to file\n"
 			"    --logfile-lines|-L <filename> : output log messages to file, with line buffering\n"
 			"    --stdout-only                 : writes errors/warnings to stdout instead of stderr\n"
-	);
+		   );
 }
 
 string g_model;
@@ -77,7 +77,11 @@ size_t g_numChannels = 0;
 Socket g_scpiSocket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
 Socket g_dataSocket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
 
+#ifdef _WIN32
+BOOL WINAPI OnQuit(DWORD signal);
+#else
 void OnQuit(int signal);
+#endif
 
 int main(int argc, char* argv[])
 {
@@ -138,7 +142,7 @@ int main(int argc, char* argv[])
 			LogNotice("Switching to USB power...\n");
 			status = ps3000aChangePowerSource(g_hScope, PICO_POWER_SUPPLY_NOT_CONNECTED);
 		}
-	        if(PICO_OK != status)
+		if(PICO_OK != status)
 		{
 			LogError("Failed to open unit (code %d)\n", status);
 			return 1;
@@ -148,7 +152,9 @@ int main(int argc, char* argv[])
 			g_pico_type = PICO3000A;
 			picoGetUnitInfo = ps3000aGetUnitInfo;
 		}
-	} else {
+	}
+	else
+	{
 		g_pico_type = PICO6000A;
 		picoGetUnitInfo = ps6000aGetUnitInfo;
 	}
@@ -243,14 +249,14 @@ int main(int argc, char* argv[])
 	//Initial channel state setup
 	for(size_t i=0; i<g_numChannels; i++)
 	{
-		switch (g_pico_type)
+		switch(g_pico_type)
 		{
-		case PICO3000A:
-			ps3000aSetChannel(g_hScope, (PS3000A_CHANNEL)i, 0, PS3000A_DC, PS3000A_1V, 0.0f);
-			break;
-		case PICO6000A:
-			ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)i);
-			break;
+			case PICO3000A:
+				ps3000aSetChannel(g_hScope, (PS3000A_CHANNEL)i, 0, PS3000A_DC, PS3000A_1V, 0.0f);
+				break;
+			case PICO6000A:
+				ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)i);
+				break;
 		}
 	}
 
@@ -267,10 +273,32 @@ int main(int argc, char* argv[])
 	}
 
 	//Figure out digital channel configuration
-	if(g_pico_type == PICO6000A)
-		g_numDigitalPods = 2;
-	else
-		g_numDigitalPods = 0;
+	switch(g_pico_type)
+	{
+		case PICO3000A:
+			/* Model 3abcdMSO with
+				a=4 chan, b=0(unknown) c=6(bandwidth 6=200MHz) d=D(revision D)
+				MSO if MSO option is available
+				example 3406DMSO (full option)
+			*/
+			if(g_model.find("MSO") > 0)
+			{
+				g_numDigitalPods = 2;
+			}
+			else
+			{
+				g_numDigitalPods = 0;
+			}
+			break;
+
+		case PICO6000A:
+			g_numDigitalPods = 2;
+			break;
+
+		default:
+			g_numDigitalPods = 0;
+	}
+
 	for(size_t i=0; i<g_numDigitalPods; i++)
 	{
 		g_msoPodEnabled[i] = false;
@@ -283,8 +311,12 @@ int main(int argc, char* argv[])
 	UpdateTrigger();
 
 	//Set up signal handlers
+#ifdef _WIN32
+	SetConsoleCtrlHandler(OnQuit, TRUE);
+#else
 	signal(SIGINT, OnQuit);
 	signal(SIGPIPE, SIG_IGN);
+#endif
 
 	//Configure the data plane socket
 	g_dataSocket.Bind(waveform_port);
@@ -315,15 +347,39 @@ int main(int argc, char* argv[])
 	}
 
 	//Done
-	ps6000aCloseUnit(g_hScope);
+	switch(g_pico_type)
+	{
+		case PICO3000A:
+			ps3000aCloseUnit(g_hScope);
+			break;
+		case PICO6000A:
+			ps6000aCloseUnit(g_hScope);
+			break;
+	}
+
 	return 0;
 }
 
+#ifdef _WIN32
+BOOL WINAPI OnQuit(DWORD signal)
+{
+	(void)signal;
+#else
 void OnQuit(int /*signal*/)
 {
+#endif
 	LogNotice("Shutting down...\n");
 
 	lock_guard<mutex> lock(g_mutex);
-	ps6000aCloseUnit(g_hScope);
+	switch (g_pico_type)
+	{
+		case PICO3000A:
+			ps3000aCloseUnit(g_hScope);
+			break;
+		case PICO6000A:
+			ps6000aCloseUnit(g_hScope);
+			break;
+	}
 	exit(0);
 }
+
