@@ -44,9 +44,9 @@ vector<PICO_CHANNEL> g_channelIDs;
 
 void WaveformServerThread()
 {
-	#ifdef __linux__
+#ifdef __linux__
 	pthread_setname_np(pthread_self(), "WaveformThread");
-	#endif
+#endif
 
 	Socket client = g_dataSocket.Accept();
 	LogVerbose("Client connected to data plane socket\n");
@@ -116,10 +116,10 @@ void WaveformServerThread()
 				{
 					if(g_pico_type == PICO6000A)
 						ps6000aSetDataBuffer(g_hScope, ch, NULL,
-							0, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_CLEAR_ALL);
+						                     0, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_CLEAR_ALL);
 					else if(g_pico_type == PICO3000A)
 						ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)ch, NULL,
-							0, 0, PS3000A_RATIO_MODE_NONE);
+						                     0, 0, PS3000A_RATIO_MODE_NONE);
 				}
 
 				//Clear out old buffers
@@ -144,10 +144,10 @@ void WaveformServerThread()
 					auto ch = g_channelIDs[i];
 					if(g_pico_type == PICO6000A)
 						status = ps6000aSetDataBuffer(g_hScope, (PICO_CHANNEL)ch, waveformBuffers[i],
-							g_captureMemDepth, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_ADD);
+						                              g_captureMemDepth, PICO_INT16_T, 0, PICO_RATIO_MODE_RAW, PICO_ADD);
 					else if(g_pico_type == PICO3000A)
 						status = ps3000aSetDataBuffer(g_hScope, (PS3000A_CHANNEL)ch, waveformBuffers[i],
-							g_captureMemDepth, 0, PS3000A_RATIO_MODE_NONE);
+						                              g_captureMemDepth, 0, PS3000A_RATIO_MODE_NONE);
 					if(status != PICO_OK)
 						LogFatal("psXXXXSetDataBuffer for channel %d failed (code 0x%x)\n", ch, status);
 				}

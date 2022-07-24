@@ -223,7 +223,7 @@ PicoSCPIServer::~PicoSCPIServer()
 		it.second = false;
 		g_channelOnDuringArm[it.first] = false;
 	}
-	
+
 	for(int i=0; i<2; i++)
 	{
 		switch(g_pico_type)
@@ -235,7 +235,7 @@ PicoSCPIServer::~PicoSCPIServer()
 			ps6000aSetDigitalPortOff(g_hScope, (PICO_CHANNEL)(PICO_PORT0 + i));
 			break;
 		}
-		g_msoPodEnabled[i] = false;		
+		g_msoPodEnabled[i] = false;
 	}
 }
 
@@ -243,9 +243,9 @@ PicoSCPIServer::~PicoSCPIServer()
 // Command parsing
 
 bool PicoSCPIServer::OnQuery(
-		const string& line,
-		const string& subject,
-		const string& cmd)
+    const string& line,
+    const string& subject,
+    const string& cmd)
 {
 	//Extract channel ID from subject and clamp bounds
 	size_t channelId = 0;
@@ -267,59 +267,60 @@ bool PicoSCPIServer::OnQuery(
 	if(BridgeSCPIServer::OnQuery(line, subject, cmd))
 	{
 		return true;
-	} else if(cmd == "PRESENT")
+	}
+	else if(cmd == "PRESENT")
 	{
 		lock_guard<mutex> lock(g_mutex);
 
 		switch(g_pico_type)
 		{
-			case PICO3000A:
+		case PICO3000A:
+		{
+			//There's no API to test for presence of a MSO pod without trying to enable it.
+			//If no pod is present, this call will return an error.
+			PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
+			auto status = ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 1, g_msoPodThreshold[channelId][0]);
+			if(status == PICO_OK)
 			{
-				//There's no API to test for presence of a MSO pod without trying to enable it.
-				//If no pod is present, this call will return an error.
-				PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
-				auto status = ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 1, g_msoPodThreshold[channelId][0]);
-				if(status == PICO_OK)
-				{
-					// The pod is here. If we don't need it on, shut it back off
-					if(!g_msoPodEnabled[channelId])
-						ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 0, 0);
+				// The pod is here. If we don't need it on, shut it back off
+				if(!g_msoPodEnabled[channelId])
+					ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 0, 0);
 
-					SendReply("1");
-				}
-				else
-				{
-					SendReply("0");
-				}
+				SendReply("1");
 			}
-			break;
-
-			case PICO6000A:
+			else
 			{
-				//There's no API to test for presence of a MSO pod without trying to enable it.
-				//If no pod is present, this call will return PICO_NO_MSO_POD_CONNECTED.
-				PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
-				auto status = ps6000aSetDigitalPortOn(
-					g_hScope,
-					podId,
-					g_msoPodThreshold[channelId],
-					8,
-					g_msoHysteresis[channelId]);
-
-				if(status == PICO_NO_MSO_POD_CONNECTED)
-				{
-					SendReply("0");
-				}
-				else
-				{
-					// The pod is here. If we don't need it on, shut it back off
-					if(!g_msoPodEnabled[channelId])
-						ps6000aSetDigitalPortOff(g_hScope, podId);
-
-					SendReply("1");
-				}
+				SendReply("0");
 			}
-			break;
+		}
+		break;
+
+		case PICO6000A:
+		{
+			//There's no API to test for presence of a MSO pod without trying to enable it.
+			//If no pod is present, this call will return PICO_NO_MSO_POD_CONNECTED.
+			PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + channelId);
+			auto status = ps6000aSetDigitalPortOn(
+			                  g_hScope,
+			                  podId,
+			                  g_msoPodThreshold[channelId],
+			                  8,
+			                  g_msoHysteresis[channelId]);
+
+			if(status == PICO_NO_MSO_POD_CONNECTED)
+			{
+				SendReply("0");
+			}
+			else
+			{
+				// The pod is here. If we don't need it on, shut it back off
+				if(!g_msoPodEnabled[channelId])
+					ps6000aSetDigitalPortOff(g_hScope, podId);
+
+				SendReply("1");
+			}
+		}
+		break;
 		}
 	}
 	else
@@ -382,7 +383,7 @@ vector<size_t> PicoSCPIServer::GetSampleRates()
 		case PICO3000A:
 			status = ps3000aGetTimebase(g_hScope, i, 1, &intervalNs_int, 0, &maxSamples_int, 0);
 			intervalNs = intervalNs_int;
-			maxSamples = maxSamples_int;			
+			maxSamples = maxSamples_int;
 			break;
 		case PICO6000A:
 			status = ps6000aGetTimebase(g_hScope, i, 1, &intervalNs, &maxSamples, 0);
@@ -455,10 +456,10 @@ vector<size_t> PicoSCPIServer::GetSampleDepths()
 }
 
 bool PicoSCPIServer::OnCommand(
-		const string& line,
-		const string& subject,
-		const string& cmd,
-		const vector<string>& args)
+    const string& line,
+    const string& subject,
+    const string& cmd,
+    const vector<string>& args)
 {
 	//Function generator is different from normal channels
 	//(uses range/offs commands so must go before normal bridge processing!)
@@ -486,25 +487,25 @@ bool PicoSCPIServer::OnCommand(
 				g_awgFreq = stof(args[0]);
 				switch(g_pico_type)
 				{
-					case PICO3000A:
-					{
-						/* TODO PICO3000A FREQ */
-						LogError("PICO3000A FREQ TODO code\n");
-						/*
-						auto status = ps6000aSigGenFrequency(g_hScope, g_awgFreq);
-						if(status != PICO_OK)
-							LogError("ps6000aSigGenFrequency failed, code 0x%x (freq=%f)\n", status, g_awgFreq);
-						*/
-					}
-					break;
+				case PICO3000A:
+				{
+					/* TODO PICO3000A FREQ */
+					LogError("PICO3000A FREQ TODO code\n");
+					/*
+					auto status = ps6000aSigGenFrequency(g_hScope, g_awgFreq);
+					if(status != PICO_OK)
+						LogError("ps6000aSigGenFrequency failed, code 0x%x (freq=%f)\n", status, g_awgFreq);
+					*/
+				}
+				break;
 
-					case PICO6000A:
-					{
-						auto status = ps6000aSigGenFrequency(g_hScope, g_awgFreq);
-						if(status != PICO_OK)
-							LogError("ps6000aSigGenFrequency failed, code 0x%x (freq=%f)\n", status, g_awgFreq);
-					}
-					break;
+				case PICO6000A:
+				{
+					auto status = ps6000aSigGenFrequency(g_hScope, g_awgFreq);
+					if(status != PICO_OK)
+						LogError("ps6000aSigGenFrequency failed, code 0x%x (freq=%f)\n", status, g_awgFreq);
+				}
+				break;
 				}
 				ReconfigAWG();
 			}
@@ -513,32 +514,32 @@ bool PicoSCPIServer::OnCommand(
 			{
 				lock_guard<mutex> lock(g_mutex);
 				auto duty = stof(args[0]) * 100;
-				
+
 				switch(g_pico_type)
 				{
-					case PICO3000A:
-					{
-						/* TODO PICO3000A DUTY */
-						LogError("PICO3000A DUTY TODO code\n");
-						/*
-						auto status = ps6000aSigGenWaveformDutyCycle(g_hScope, duty);
-						if(status != PICO_OK)
-							LogError("ps6000aSigGenWaveformDutyCycle failed, code 0x%x\n", status);
+				case PICO3000A:
+				{
+					/* TODO PICO3000A DUTY */
+					LogError("PICO3000A DUTY TODO code\n");
+					/*
+					auto status = ps6000aSigGenWaveformDutyCycle(g_hScope, duty);
+					if(status != PICO_OK)
+						LogError("ps6000aSigGenWaveformDutyCycle failed, code 0x%x\n", status);
 
-						ReconfigAWG();
-						*/
-					}
-					break;
+					ReconfigAWG();
+					*/
+				}
+				break;
 
-					case PICO6000A:
-					{
-						auto status = ps6000aSigGenWaveformDutyCycle(g_hScope, duty);
-						if(status != PICO_OK)
-							LogError("ps6000aSigGenWaveformDutyCycle failed, code 0x%x\n", status);
+				case PICO6000A:
+				{
+					auto status = ps6000aSigGenWaveformDutyCycle(g_hScope, duty);
+					if(status != PICO_OK)
+						LogError("ps6000aSigGenWaveformDutyCycle failed, code 0x%x\n", status);
 
-						ReconfigAWG();
-					}
-					break;
+					ReconfigAWG();
+				}
+				break;
 				}
 			}
 
@@ -591,32 +592,32 @@ bool PicoSCPIServer::OnCommand(
 
 				switch(g_pico_type)
 				{
-					case PICO3000A:
-					{
-						/* TODO PICO3000A SHAPE */
-						LogError("PICO3000A SHAPE TODO code\n");
-						/*
-						//Set waveform type
-						auto status = ps6000aSigGenWaveform(g_hScope, type, NULL, 0);
-						if(PICO_OK != status)
-							LogError("ps6000aSigGenWaveform failed, code 0x%x\n", status);
+				case PICO3000A:
+				{
+					/* TODO PICO3000A SHAPE */
+					LogError("PICO3000A SHAPE TODO code\n");
+					/*
+					//Set waveform type
+					auto status = ps6000aSigGenWaveform(g_hScope, type, NULL, 0);
+					if(PICO_OK != status)
+						LogError("ps6000aSigGenWaveform failed, code 0x%x\n", status);
 
-						ReconfigAWG();
-						*/
-					}
-					break;
+					ReconfigAWG();
+					*/
+				}
+				break;
 
-					case PICO6000A:
-					{
-						//Set waveform type
-						auto status = ps6000aSigGenWaveform(g_hScope, type, NULL, 0);
-						if(PICO_OK != status)
-							LogError("ps6000aSigGenWaveform failed, code 0x%x\n", status);
+				case PICO6000A:
+				{
+					//Set waveform type
+					auto status = ps6000aSigGenWaveform(g_hScope, type, NULL, 0);
+					if(PICO_OK != status)
+						LogError("ps6000aSigGenWaveform failed, code 0x%x\n", status);
 
-						ReconfigAWG();
-					}
-					break;
-				}					
+					ReconfigAWG();
+				}
+				break;
+				}
 			}
 			else
 				LogError("Unrecognized AWG command %s\n", line.c_str());
@@ -643,20 +644,20 @@ bool PicoSCPIServer::OnCommand(
 		int bits = stoi(args[0]);
 		switch(bits)
 		{
-			case 8:
-				ps6000aSetDeviceResolution(g_hScope, PICO_DR_8BIT);
-				break;
+		case 8:
+			ps6000aSetDeviceResolution(g_hScope, PICO_DR_8BIT);
+			break;
 
-			case 10:
-				ps6000aSetDeviceResolution(g_hScope, PICO_DR_10BIT);
-				break;
+		case 10:
+			ps6000aSetDeviceResolution(g_hScope, PICO_DR_10BIT);
+			break;
 
-			case 12:
-				ps6000aSetDeviceResolution(g_hScope, PICO_DR_12BIT);
-				break;
+		case 12:
+			ps6000aSetDeviceResolution(g_hScope, PICO_DR_12BIT);
+			break;
 
-			default:
-				LogError("User requested invalid resolution (%d bits)\n", bits);
+		default:
+			LogError("User requested invalid resolution (%d bits)\n", bits);
 		}
 
 		if(g_triggerArmed)
@@ -685,59 +686,59 @@ void PicoSCPIServer::ReconfigAWG()
 	// TODO PS3000A
 	switch(g_pico_type)
 	{
-		case PICO3000A:
-		{
-			/* TODO PICO3000A ReconfigAWG */
-			LogError("PICO3000A ReconfigAWG TODO code\n");
-			/*
-			auto status = ps6000aSigGenRange(g_hScope, g_awgRange, g_awgOffset);
-			if(PICO_OK != status)
-				LogError("ps6000aSigGenRange failed, code 0x%x\n", status);
+	case PICO3000A:
+	{
+		/* TODO PICO3000A ReconfigAWG */
+		LogError("PICO3000A ReconfigAWG TODO code\n");
+		/*
+		auto status = ps6000aSigGenRange(g_hScope, g_awgRange, g_awgOffset);
+		if(PICO_OK != status)
+			LogError("ps6000aSigGenRange failed, code 0x%x\n", status);
 
-			double freq = g_awgFreq;
-			double inc = 0;
-			double dwell = 0;
-			status = ps6000aSigGenApply(
-				g_hScope,
-				g_awgOn,
-				false,		//sweep enable
-				false,		//trigger enable
-				true,		//automatic DDS sample frequency
-				false,		//do not override clock and prescale
-				&freq,
-				&freq,
-				&inc,
-				&dwell);
-			if(PICO_OK != status)
-				LogError("ps6000aSigGenApply failed, code 0x%x\n", status);
-			*/
-		}
-		break;
+		double freq = g_awgFreq;
+		double inc = 0;
+		double dwell = 0;
+		status = ps6000aSigGenApply(
+			g_hScope,
+			g_awgOn,
+			false,		//sweep enable
+			false,		//trigger enable
+			true,		//automatic DDS sample frequency
+			false,		//do not override clock and prescale
+			&freq,
+			&freq,
+			&inc,
+			&dwell);
+		if(PICO_OK != status)
+			LogError("ps6000aSigGenApply failed, code 0x%x\n", status);
+		*/
+	}
+	break;
 
-		case PICO6000A:
-		{	
-			auto status = ps6000aSigGenRange(g_hScope, g_awgRange, g_awgOffset);
-			if(PICO_OK != status)
-				LogError("ps6000aSigGenRange failed, code 0x%x\n", status);
+	case PICO6000A:
+	{
+		auto status = ps6000aSigGenRange(g_hScope, g_awgRange, g_awgOffset);
+		if(PICO_OK != status)
+			LogError("ps6000aSigGenRange failed, code 0x%x\n", status);
 
-			double freq = g_awgFreq;
-			double inc = 0;
-			double dwell = 0;
-			status = ps6000aSigGenApply(
-				g_hScope,
-				g_awgOn,
-				false,		//sweep enable
-				false,		//trigger enable
-				true,		//automatic DDS sample frequency
-				false,		//do not override clock and prescale
-				&freq,
-				&freq,
-				&inc,
-				&dwell);
-			if(PICO_OK != status)
-				LogError("ps6000aSigGenApply failed, code 0x%x\n", status);
-		}
-		break;
+		double freq = g_awgFreq;
+		double inc = 0;
+		double dwell = 0;
+		status = ps6000aSigGenApply(
+		             g_hScope,
+		             g_awgOn,
+		             false,		//sweep enable
+		             false,		//trigger enable
+		             true,		//automatic DDS sample frequency
+		             false,		//do not override clock and prescale
+		             &freq,
+		             &freq,
+		             &inc,
+		             &dwell);
+		if(PICO_OK != status)
+			LogError("ps6000aSigGenApply failed, code 0x%x\n", status);
+	}
+	break;
 	}
 }
 
@@ -865,56 +866,56 @@ void PicoSCPIServer::SetChannelEnabled(size_t chIndex, bool enabled)
 		{
 			switch(g_pico_type)
 			{
-				case PICO3000A:
-				{
-					auto status = ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 1, g_msoPodThreshold[podIndex][0]);
-					if(status != PICO_OK)
-						LogError("ps3000aSetDigitalPort failed with code %x\n", status);
-					else
-						g_msoPodEnabled[podIndex] = true;
-				}
-				break;
+			case PICO3000A:
+			{
+				auto status = ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 1, g_msoPodThreshold[podIndex][0]);
+				if(status != PICO_OK)
+					LogError("ps3000aSetDigitalPort failed with code %x\n", status);
+				else
+					g_msoPodEnabled[podIndex] = true;
+			}
+			break;
 
-				case PICO6000A:
-				{
-					auto status = ps6000aSetDigitalPortOn(
-						g_hScope,
-						podId,
-						g_msoPodThreshold[podIndex],
-						8,
-						g_msoHysteresis[podIndex]);
-					if(status != PICO_OK)
-						LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
-					else
-						g_msoPodEnabled[podIndex] = true;
-				}
-				break;
+			case PICO6000A:
+			{
+				auto status = ps6000aSetDigitalPortOn(
+				                  g_hScope,
+				                  podId,
+				                  g_msoPodThreshold[podIndex],
+				                  8,
+				                  g_msoHysteresis[podIndex]);
+				if(status != PICO_OK)
+					LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
+				else
+					g_msoPodEnabled[podIndex] = true;
+			}
+			break;
 			}
 		}
 		else
 		{
 			switch(g_pico_type)
 			{
-				case PICO3000A:
-				{
-					auto status = ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 0, 0);
-					if(status != PICO_OK)
-						LogError("ps3000aSetDigitalPort failed with code %x\n", status);
-					else
-						g_msoPodEnabled[podIndex] = false;
-				}
-				break;
+			case PICO3000A:
+			{
+				auto status = ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 0, 0);
+				if(status != PICO_OK)
+					LogError("ps3000aSetDigitalPort failed with code %x\n", status);
+				else
+					g_msoPodEnabled[podIndex] = false;
+			}
+			break;
 
-				case PICO6000A:
-				{
-					auto status = ps6000aSetDigitalPortOff(g_hScope, podId);
-					if(status != PICO_OK)
-						LogError("ps6000aSetDigitalPortOff failed with code %x\n", status);
-					else
-						g_msoPodEnabled[podIndex] = false;
-				}
-				break;
-			}	
+			case PICO6000A:
+			{
+				auto status = ps6000aSetDigitalPortOff(g_hScope, podId);
+				if(status != PICO_OK)
+					LogError("ps6000aSetDigitalPortOff failed with code %x\n", status);
+				else
+					g_msoPodEnabled[podIndex] = false;
+			}
+			break;
+			}
 		}
 	}
 	else
@@ -1057,7 +1058,8 @@ void PicoSCPIServer::SetAnalogOffset(size_t chIndex, double offset_V)
 	float minoff_f;
 
 	//Clamp to allowed range
-	switch(g_pico_type) {
+	switch(g_pico_type)
+	{
 	case PICO3000A:
 		ps3000aGetAnalogueOffset(g_hScope, g_range_3000a[channelId], (PS3000A_COUPLING)g_coupling[channelId], &maxoff_f, &minoff_f);
 		maxoff = maxoff_f;
@@ -1109,7 +1111,7 @@ void PicoSCPIServer::SetDigitalHysteresis(size_t chIndex, double hysteresis)
 		g_msoHysteresis[channelId] = PICO_VERY_HIGH_400MV;
 
 	LogTrace("Setting MSO pod %d hysteresis to %d mV (code %d)\n",
-		channelId, level, g_msoHysteresis[channelId]);
+	         channelId, level, g_msoHysteresis[channelId]);
 
 	//Update the pod if currently active
 	if(g_msoPodEnabled[channelId])
@@ -1122,44 +1124,45 @@ void PicoSCPIServer::SetSampleRate(uint64_t rate_hz)
 	int timebase;
 	double period_ns;
 
-	switch(g_pico_type) {
-		case PICO3000A:
-		{
-			//Convert sample rate to sample period
-			g_sampleInterval = 1e15 / rate_hz;
-			period_ns = 1e9 / rate_hz;
+	switch(g_pico_type)
+	{
+	case PICO3000A:
+	{
+		//Convert sample rate to sample period
+		g_sampleInterval = 1e15 / rate_hz;
+		period_ns = 1e9 / rate_hz;
 
-			//Find closest timebase setting
-			double clkdiv = period_ns;
-			if(period_ns < 1)
-				timebase = 0;
-			else
-				timebase = round(log(clkdiv)/log(2));
-		}
-		break;
-
-		case PICO6000A:
-		{
-			//Convert sample rate to sample period
-			g_sampleInterval = 1e15 / rate_hz;
-			period_ns = 1e9 / rate_hz;
-
-			//Find closest timebase setting
-			double clkdiv = period_ns / 0.2;
-			if(period_ns < 5)
-				timebase = round(log(clkdiv)/log(2));
-			else
-				timebase = round(clkdiv/32) + 4;	
-		}
-		break;
-		
-		default: /* Unknown Pico Type */
-		{
-			
-			g_sampleInterval = 1e15 / rate_hz;
+		//Find closest timebase setting
+		double clkdiv = period_ns;
+		if(period_ns < 1)
 			timebase = 0;
-			LogError("SetSampleRate Error unknown g_pico_type\n");
-		}
+		else
+			timebase = round(log(clkdiv)/log(2));
+	}
+	break;
+
+	case PICO6000A:
+	{
+		//Convert sample rate to sample period
+		g_sampleInterval = 1e15 / rate_hz;
+		period_ns = 1e9 / rate_hz;
+
+		//Find closest timebase setting
+		double clkdiv = period_ns / 0.2;
+		if(period_ns < 5)
+			timebase = round(log(clkdiv)/log(2));
+		else
+			timebase = round(clkdiv/32) + 4;
+	}
+	break;
+
+	default: /* Unknown Pico Type */
+	{
+
+		g_sampleInterval = 1e15 / rate_hz;
+		timebase = 0;
+		LogError("SetSampleRate Error unknown g_pico_type\n");
+	}
 	}
 
 	g_timebase = timebase;
@@ -1188,39 +1191,39 @@ void PicoSCPIServer::SetTriggerSource(size_t chIndex)
 	auto type = GetChannelType(chIndex);
 	switch(type)
 	{
-		case CH_ANALOG:
-			g_triggerChannel = chIndex & 0xff;
-			if(!g_channelOn[g_triggerChannel])
-			{
-				LogDebug("Trigger channel wasn't on, enabling it\n");
-				g_channelOn[g_triggerChannel] = true;
-				UpdateChannel(g_triggerChannel);
-			}
-			break;
+	case CH_ANALOG:
+		g_triggerChannel = chIndex & 0xff;
+		if(!g_channelOn[g_triggerChannel])
+		{
+			LogDebug("Trigger channel wasn't on, enabling it\n");
+			g_channelOn[g_triggerChannel] = true;
+			UpdateChannel(g_triggerChannel);
+		}
+		break;
 
-		case CH_DIGITAL:
-			{
-				int npod = chIndex & 0xff;
-				int nchan = (chIndex >> 8) & 0xff;
-				g_triggerChannel = g_numChannels + npod*8 + nchan;
+	case CH_DIGITAL:
+	{
+		int npod = chIndex & 0xff;
+		int nchan = (chIndex >> 8) & 0xff;
+		g_triggerChannel = g_numChannels + npod*8 + nchan;
 
-				if(!g_msoPodEnabled[npod])
-				{
-					LogDebug("Trigger pod wasn't on, enabling it\n");
-					EnableMsoPod(npod);
-				}
-			}
-			break;
+		if(!g_msoPodEnabled[npod])
+		{
+			LogDebug("Trigger pod wasn't on, enabling it\n");
+			EnableMsoPod(npod);
+		}
+	}
+	break;
 
-		case CH_EXTERNAL_TRIGGER:
-			{
-				g_triggerChannel = PICO_TRIGGER_AUX;
-				UpdateTrigger();
-			};
+	case CH_EXTERNAL_TRIGGER:
+	{
+		g_triggerChannel = PICO_TRIGGER_AUX;
+		UpdateTrigger();
+	};
 
-		default:
-			//TODO
-			break;
+	default:
+		//TODO
+		break;
 	}
 
 	bool wasOn = g_triggerArmed;
@@ -1271,39 +1274,39 @@ void UpdateChannel(size_t chan)
 {
 	switch(g_pico_type)
 	{
-		case PICO3000A:
+	case PICO3000A:
+	{
+		ps3000aSetChannel(g_hScope, (PS3000A_CHANNEL)chan, g_channelOn[chan],
+		                  (PS3000A_COUPLING)g_coupling[chan], g_range_3000a[chan], -g_offset[chan]);
+		ps3000aSetBandwidthFilter(g_hScope, (PS3000A_CHANNEL)chan,
+		                          (PS3000A_BANDWIDTH_LIMITER)g_bandwidth_legacy[chan]);
+
+		//We use software triggering based on raw ADC codes.
+		//Any time we change the frontend configuration on the trigger channel, it has to be reconfigured.
+		//TODO: handle multi-input triggers
+		if(chan == g_triggerChannel)
+			UpdateTrigger();
+		return;
+	}
+	break;
+
+	case PICO6000A:
+	{
+		if(g_channelOn[chan])
 		{
-			ps3000aSetChannel(g_hScope, (PS3000A_CHANNEL)chan, g_channelOn[chan],
-				(PS3000A_COUPLING)g_coupling[chan], g_range_3000a[chan], -g_offset[chan]);
-			ps3000aSetBandwidthFilter(g_hScope, (PS3000A_CHANNEL)chan,
-				(PS3000A_BANDWIDTH_LIMITER)g_bandwidth_legacy[chan]);
+			ps6000aSetChannelOn(g_hScope, (PICO_CHANNEL)chan,
+			                    g_coupling[chan], g_range[chan], -g_offset[chan], g_bandwidth[chan]);
 
 			//We use software triggering based on raw ADC codes.
 			//Any time we change the frontend configuration on the trigger channel, it has to be reconfigured.
-			//TODO: handle multi-input triggers				
+			//TODO: handle multi-input triggers
 			if(chan == g_triggerChannel)
 				UpdateTrigger();
-			return;
 		}
-		break;
-		
-		case PICO6000A:
-		{
-			if(g_channelOn[chan])
-			{
-				ps6000aSetChannelOn(g_hScope, (PICO_CHANNEL)chan,
-					g_coupling[chan], g_range[chan], -g_offset[chan], g_bandwidth[chan]);
-
-				//We use software triggering based on raw ADC codes.
-				//Any time we change the frontend configuration on the trigger channel, it has to be reconfigured.
-				//TODO: handle multi-input triggers
-				if(chan == g_triggerChannel)
-					UpdateTrigger();
-			}
-			else
-				ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)chan);			
-		}
-		break;
+		else
+			ps6000aSetChannelOff(g_hScope, (PICO_CHANNEL)chan);
+	}
+	break;
 	}
 }
 
@@ -1351,253 +1354,253 @@ void UpdateTrigger(bool force)
 
 	switch(g_pico_type)
 	{
-		case PICO3000A:
+	case PICO3000A:
+	{
+		if(g_triggerChannel == PICO_TRIGGER_AUX)
 		{
-			if(g_triggerChannel == PICO_TRIGGER_AUX)
-			{
-				/* TODO PICO_TRIGGER_AUX PICO3000A similarly to PICO6000A... */				
-				/*
-				//Seems external trigger only supports zero crossing???
-				trig_code = 0;
+			/* TODO PICO_TRIGGER_AUX PICO3000A similarly to PICO6000A... */
+			/*
+			//Seems external trigger only supports zero crossing???
+			trig_code = 0;
 
-				//Remove old trigger conditions
-				ps6000aSetTriggerChannelConditions(
-					g_hScope,
-					NULL,
-					0,
-					PICO_CLEAR_ALL);
+			//Remove old trigger conditions
+			ps6000aSetTriggerChannelConditions(
+				g_hScope,
+				NULL,
+				0,
+				PICO_CLEAR_ALL);
 
-				//Set up new conditions
-				PICO_CONDITION cond;
-				cond.source = PICO_TRIGGER_AUX;
-				cond.condition = PICO_CONDITION_TRUE;
-				int ret = ps6000aSetTriggerChannelConditions(
-					g_hScope,
-					&cond,
-					1,
-					PICO_ADD);
-				if(ret != PICO_OK)
-					LogError("ps6000aSetTriggerChannelConditions failed: %x\n", ret);
+			//Set up new conditions
+			PICO_CONDITION cond;
+			cond.source = PICO_TRIGGER_AUX;
+			cond.condition = PICO_CONDITION_TRUE;
+			int ret = ps6000aSetTriggerChannelConditions(
+				g_hScope,
+				&cond,
+				1,
+				PICO_ADD);
+			if(ret != PICO_OK)
+				LogError("ps6000aSetTriggerChannelConditions failed: %x\n", ret);
 
-				PICO_DIRECTION dir;
-				dir.channel = PICO_TRIGGER_AUX;
-				dir.direction = PICO_RISING;
-				dir.thresholdMode = PICO_LEVEL;
-				ret = ps6000aSetTriggerChannelDirections(
-					g_hScope,
-					&dir,
-					1);
-				if(ret != PICO_OK)
-					LogError("ps6000aSetTriggerChannelDirections failed: %x\n", ret);
+			PICO_DIRECTION dir;
+			dir.channel = PICO_TRIGGER_AUX;
+			dir.direction = PICO_RISING;
+			dir.thresholdMode = PICO_LEVEL;
+			ret = ps6000aSetTriggerChannelDirections(
+				g_hScope,
+				&dir,
+				1);
+			if(ret != PICO_OK)
+				LogError("ps6000aSetTriggerChannelDirections failed: %x\n", ret);
 
-				PICO_TRIGGER_CHANNEL_PROPERTIES prop;
-				prop.thresholdUpper = trig_code;
-				prop.thresholdUpperHysteresis = 32;
-				prop.thresholdLower = 0;
-				prop.thresholdLowerHysteresis = 0;
-				prop.channel = PICO_TRIGGER_AUX;
-				ret = ps6000aSetTriggerChannelProperties(
-					g_hScope,
-					&prop,
-					1,
-					0,
-					0);
-				if(ret != PICO_OK)
-					LogError("ps6000aSetTriggerChannelProperties failed: %x\n", ret);
+			PICO_TRIGGER_CHANNEL_PROPERTIES prop;
+			prop.thresholdUpper = trig_code;
+			prop.thresholdUpperHysteresis = 32;
+			prop.thresholdLower = 0;
+			prop.thresholdLowerHysteresis = 0;
+			prop.channel = PICO_TRIGGER_AUX;
+			ret = ps6000aSetTriggerChannelProperties(
+				g_hScope,
+				&prop,
+				1,
+				0,
+				0);
+			if(ret != PICO_OK)
+				LogError("ps6000aSetTriggerChannelProperties failed: %x\n", ret);
 
-				if(force)
-					LogWarning("Force trigger doesn't currently work if trigger source is external\n");
-				*/
-				/* API is same as 6000a API */
-				int ret = ps3000aSetSimpleTrigger(
-					g_hScope,
-					1,
-					(PS3000A_CHANNEL)PICO_TRIGGER_AUX,
-					0,
-					(enPS3000AThresholdDirection)g_triggerDirection,
-					delay,
-					timeout);
-				if(ret != PICO_OK)
-					LogError("ps6000aSetSimpleTrigger failed: %x\n", ret);
-			}
-			else if(g_triggerChannel < g_numChannels)
-			{
-				/* API is same as 6000a API */
-				int ret = ps3000aSetSimpleTrigger(
-					g_hScope,
-					1,
-					(PS3000A_CHANNEL)g_triggerChannel,
-					round(trig_code),
-					(enPS3000AThresholdDirection)g_triggerDirection, // same as 6000a api
-					delay,
-					timeout);
-				if(ret != PICO_OK)
-					LogError("ps3000aSetSimpleTrigger failed: %x\n", ret);
-			}
-			else
-			{
-				/* TODO PICO3000A Trigger Digital Chan */		
-				LogError("PICO3000A Trigger Digital Chan code TODO\n");				
-				/*
-				//Remove old trigger conditions
-				ps6000aSetTriggerChannelConditions(
-					g_hScope,
-					NULL,
-					0,
-					PICO_CLEAR_ALL);
-
-				//Set up new conditions
-				int ntrig = g_triggerChannel - g_numChannels;
-				int trigpod = ntrig / 8;
-				int triglane = ntrig % 8;
-				PICO_CONDITION cond;
-				cond.source = static_cast<PICO_CHANNEL>(PICO_PORT0 + trigpod);
-				cond.condition = PICO_CONDITION_TRUE;
-				ps6000aSetTriggerChannelConditions(
-					g_hScope,
-					&cond,
-					1,
-					PICO_ADD);
-
-				//Set up configuration on the selected channel
-				PICO_DIGITAL_CHANNEL_DIRECTIONS dirs;
-				dirs.channel = static_cast<PICO_PORT_DIGITAL_CHANNEL>(PICO_PORT_DIGITAL_CHANNEL0 + triglane);
-				dirs.direction = PICO_DIGITAL_DIRECTION_RISING;				//TODO: configurable
-				ps6000aSetTriggerDigitalPortProperties(
-					g_hScope,
-					cond.source,
-					&dirs,
-					1);
-
-				//ps6000aSetTriggerDigitalPortProperties doesn't have a timeout!
-				//Should we call ps6000aSetTriggerChannelProperties with no elements to do this?
-				if(force)
-					LogWarning("Force trigger doesn't currently work if trigger source is digital\n");
-				*/
-			}			
+			if(force)
+				LogWarning("Force trigger doesn't currently work if trigger source is external\n");
+			*/
+			/* API is same as 6000a API */
+			int ret = ps3000aSetSimpleTrigger(
+			              g_hScope,
+			              1,
+			              (PS3000A_CHANNEL)PICO_TRIGGER_AUX,
+			              0,
+			              (enPS3000AThresholdDirection)g_triggerDirection,
+			              delay,
+			              timeout);
+			if(ret != PICO_OK)
+				LogError("ps6000aSetSimpleTrigger failed: %x\n", ret);
 		}
-		break;
-
-		case PICO6000A:
+		else if(g_triggerChannel < g_numChannels)
 		{
-			if(g_triggerChannel == PICO_TRIGGER_AUX)
-			{
-				/*
-				//Seems external trigger only supports zero crossing???
-				trig_code = 0;
-
-				//Remove old trigger conditions
-				ps6000aSetTriggerChannelConditions(
-					g_hScope,
-					NULL,
-					0,
-					PICO_CLEAR_ALL);
-
-				//Set up new conditions
-				PICO_CONDITION cond;
-				cond.source = PICO_TRIGGER_AUX;
-				cond.condition = PICO_CONDITION_TRUE;
-				int ret = ps6000aSetTriggerChannelConditions(
-					g_hScope,
-					&cond,
-					1,
-					PICO_ADD);
-				if(ret != PICO_OK)
-					LogError("ps6000aSetTriggerChannelConditions failed: %x\n", ret);
-
-				PICO_DIRECTION dir;
-				dir.channel = PICO_TRIGGER_AUX;
-				dir.direction = PICO_RISING;
-				dir.thresholdMode = PICO_LEVEL;
-				ret = ps6000aSetTriggerChannelDirections(
-					g_hScope,
-					&dir,
-					1);
-				if(ret != PICO_OK)
-					LogError("ps6000aSetTriggerChannelDirections failed: %x\n", ret);
-
-				PICO_TRIGGER_CHANNEL_PROPERTIES prop;
-				prop.thresholdUpper = trig_code;
-				prop.thresholdUpperHysteresis = 32;
-				prop.thresholdLower = 0;
-				prop.thresholdLowerHysteresis = 0;
-				prop.channel = PICO_TRIGGER_AUX;
-				ret = ps6000aSetTriggerChannelProperties(
-					g_hScope,
-					&prop,
-					1,
-					0,
-					0);
-				if(ret != PICO_OK)
-					LogError("ps6000aSetTriggerChannelProperties failed: %x\n", ret);
-
-				if(force)
-					LogWarning("Force trigger doesn't currently work if trigger source is external\n");
-				*/
-
-				int ret = ps6000aSetSimpleTrigger(
-					g_hScope,
-					1,
-					PICO_TRIGGER_AUX,
-					0,
-					g_triggerDirection,
-					delay,
-					timeout);
-				if(ret != PICO_OK)
-					LogError("ps6000aSetSimpleTrigger failed: %x\n", ret);
-			}
-			else if(g_triggerChannel < g_numChannels)
-			{
-				int ret = ps6000aSetSimpleTrigger(
-					g_hScope,
-					1,
-					(PICO_CHANNEL)g_triggerChannel,
-					round(trig_code),
-					g_triggerDirection,
-					delay,
-					timeout);
-				if(ret != PICO_OK)
-					LogError("ps6000aSetSimpleTrigger failed: %x\n", ret);
-			}
-			else
-			{
-				//Remove old trigger conditions
-				ps6000aSetTriggerChannelConditions(
-					g_hScope,
-					NULL,
-					0,
-					PICO_CLEAR_ALL);
-
-				//Set up new conditions
-				int ntrig = g_triggerChannel - g_numChannels;
-				int trigpod = ntrig / 8;
-				int triglane = ntrig % 8;
-				PICO_CONDITION cond;
-				cond.source = static_cast<PICO_CHANNEL>(PICO_PORT0 + trigpod);
-				cond.condition = PICO_CONDITION_TRUE;
-				ps6000aSetTriggerChannelConditions(
-					g_hScope,
-					&cond,
-					1,
-					PICO_ADD);
-
-				//Set up configuration on the selected channel
-				PICO_DIGITAL_CHANNEL_DIRECTIONS dirs;
-				dirs.channel = static_cast<PICO_PORT_DIGITAL_CHANNEL>(PICO_PORT_DIGITAL_CHANNEL0 + triglane);
-				dirs.direction = PICO_DIGITAL_DIRECTION_RISING;				//TODO: configurable
-				ps6000aSetTriggerDigitalPortProperties(
-					g_hScope,
-					cond.source,
-					&dirs,
-					1);
-
-				//ps6000aSetTriggerDigitalPortProperties doesn't have a timeout!
-				//Should we call ps6000aSetTriggerChannelProperties with no elements to do this?
-				if(force)
-					LogWarning("Force trigger doesn't currently work if trigger source is digital\n");
-			}
+			/* API is same as 6000a API */
+			int ret = ps3000aSetSimpleTrigger(
+			              g_hScope,
+			              1,
+			              (PS3000A_CHANNEL)g_triggerChannel,
+			              round(trig_code),
+			              (enPS3000AThresholdDirection)g_triggerDirection, // same as 6000a api
+			              delay,
+			              timeout);
+			if(ret != PICO_OK)
+				LogError("ps3000aSetSimpleTrigger failed: %x\n", ret);
 		}
-		break;
+		else
+		{
+			/* TODO PICO3000A Trigger Digital Chan */
+			LogError("PICO3000A Trigger Digital Chan code TODO\n");
+			/*
+			//Remove old trigger conditions
+			ps6000aSetTriggerChannelConditions(
+				g_hScope,
+				NULL,
+				0,
+				PICO_CLEAR_ALL);
+
+			//Set up new conditions
+			int ntrig = g_triggerChannel - g_numChannels;
+			int trigpod = ntrig / 8;
+			int triglane = ntrig % 8;
+			PICO_CONDITION cond;
+			cond.source = static_cast<PICO_CHANNEL>(PICO_PORT0 + trigpod);
+			cond.condition = PICO_CONDITION_TRUE;
+			ps6000aSetTriggerChannelConditions(
+				g_hScope,
+				&cond,
+				1,
+				PICO_ADD);
+
+			//Set up configuration on the selected channel
+			PICO_DIGITAL_CHANNEL_DIRECTIONS dirs;
+			dirs.channel = static_cast<PICO_PORT_DIGITAL_CHANNEL>(PICO_PORT_DIGITAL_CHANNEL0 + triglane);
+			dirs.direction = PICO_DIGITAL_DIRECTION_RISING;				//TODO: configurable
+			ps6000aSetTriggerDigitalPortProperties(
+				g_hScope,
+				cond.source,
+				&dirs,
+				1);
+
+			//ps6000aSetTriggerDigitalPortProperties doesn't have a timeout!
+			//Should we call ps6000aSetTriggerChannelProperties with no elements to do this?
+			if(force)
+				LogWarning("Force trigger doesn't currently work if trigger source is digital\n");
+			*/
+		}
+	}
+	break;
+
+	case PICO6000A:
+	{
+		if(g_triggerChannel == PICO_TRIGGER_AUX)
+		{
+			/*
+			//Seems external trigger only supports zero crossing???
+			trig_code = 0;
+
+			//Remove old trigger conditions
+			ps6000aSetTriggerChannelConditions(
+				g_hScope,
+				NULL,
+				0,
+				PICO_CLEAR_ALL);
+
+			//Set up new conditions
+			PICO_CONDITION cond;
+			cond.source = PICO_TRIGGER_AUX;
+			cond.condition = PICO_CONDITION_TRUE;
+			int ret = ps6000aSetTriggerChannelConditions(
+				g_hScope,
+				&cond,
+				1,
+				PICO_ADD);
+			if(ret != PICO_OK)
+				LogError("ps6000aSetTriggerChannelConditions failed: %x\n", ret);
+
+			PICO_DIRECTION dir;
+			dir.channel = PICO_TRIGGER_AUX;
+			dir.direction = PICO_RISING;
+			dir.thresholdMode = PICO_LEVEL;
+			ret = ps6000aSetTriggerChannelDirections(
+				g_hScope,
+				&dir,
+				1);
+			if(ret != PICO_OK)
+				LogError("ps6000aSetTriggerChannelDirections failed: %x\n", ret);
+
+			PICO_TRIGGER_CHANNEL_PROPERTIES prop;
+			prop.thresholdUpper = trig_code;
+			prop.thresholdUpperHysteresis = 32;
+			prop.thresholdLower = 0;
+			prop.thresholdLowerHysteresis = 0;
+			prop.channel = PICO_TRIGGER_AUX;
+			ret = ps6000aSetTriggerChannelProperties(
+				g_hScope,
+				&prop,
+				1,
+				0,
+				0);
+			if(ret != PICO_OK)
+				LogError("ps6000aSetTriggerChannelProperties failed: %x\n", ret);
+
+			if(force)
+				LogWarning("Force trigger doesn't currently work if trigger source is external\n");
+			*/
+
+			int ret = ps6000aSetSimpleTrigger(
+			              g_hScope,
+			              1,
+			              PICO_TRIGGER_AUX,
+			              0,
+			              g_triggerDirection,
+			              delay,
+			              timeout);
+			if(ret != PICO_OK)
+				LogError("ps6000aSetSimpleTrigger failed: %x\n", ret);
+		}
+		else if(g_triggerChannel < g_numChannels)
+		{
+			int ret = ps6000aSetSimpleTrigger(
+			              g_hScope,
+			              1,
+			              (PICO_CHANNEL)g_triggerChannel,
+			              round(trig_code),
+			              g_triggerDirection,
+			              delay,
+			              timeout);
+			if(ret != PICO_OK)
+				LogError("ps6000aSetSimpleTrigger failed: %x\n", ret);
+		}
+		else
+		{
+			//Remove old trigger conditions
+			ps6000aSetTriggerChannelConditions(
+			    g_hScope,
+			    NULL,
+			    0,
+			    PICO_CLEAR_ALL);
+
+			//Set up new conditions
+			int ntrig = g_triggerChannel - g_numChannels;
+			int trigpod = ntrig / 8;
+			int triglane = ntrig % 8;
+			PICO_CONDITION cond;
+			cond.source = static_cast<PICO_CHANNEL>(PICO_PORT0 + trigpod);
+			cond.condition = PICO_CONDITION_TRUE;
+			ps6000aSetTriggerChannelConditions(
+			    g_hScope,
+			    &cond,
+			    1,
+			    PICO_ADD);
+
+			//Set up configuration on the selected channel
+			PICO_DIGITAL_CHANNEL_DIRECTIONS dirs;
+			dirs.channel = static_cast<PICO_PORT_DIGITAL_CHANNEL>(PICO_PORT_DIGITAL_CHANNEL0 + triglane);
+			dirs.direction = PICO_DIGITAL_DIRECTION_RISING;				//TODO: configurable
+			ps6000aSetTriggerDigitalPortProperties(
+			    g_hScope,
+			    cond.source,
+			    &dirs,
+			    1);
+
+			//ps6000aSetTriggerDigitalPortProperties doesn't have a timeout!
+			//Should we call ps6000aSetTriggerChannelProperties with no elements to do this?
+			if(force)
+				LogWarning("Force trigger doesn't currently work if trigger source is digital\n");
+		}
+	}
+	break;
 	}
 
 	if(g_triggerArmed)
@@ -1608,13 +1611,13 @@ void Stop()
 {
 	switch(g_pico_type)
 	{
-		case PICO3000A:
-			ps3000aStop(g_hScope);
-			break;
+	case PICO3000A:
+		ps3000aStop(g_hScope);
+		break;
 
-		case PICO6000A:
-			ps6000aStop(g_hScope);
-			break;
+	case PICO6000A:
+		ps6000aStop(g_hScope);
+		break;
 	}
 }
 
@@ -1628,15 +1631,15 @@ PICO_STATUS StartInternal()
 
 	switch(g_pico_type)
 	{
-		case PICO3000A:
-			// TODO: why the 1
-			return ps3000aRunBlock(g_hScope, nPreTrigger, nPostTrigger, g_timebase, 1, NULL, 0, NULL, NULL);
+	case PICO3000A:
+		// TODO: why the 1
+		return ps3000aRunBlock(g_hScope, nPreTrigger, nPostTrigger, g_timebase, 1, NULL, 0, NULL, NULL);
 
-		case PICO6000A:
-			return ps6000aRunBlock(g_hScope, nPreTrigger, nPostTrigger, g_timebase, NULL, 0, NULL, NULL);
+	case PICO6000A:
+		return ps6000aRunBlock(g_hScope, nPreTrigger, nPostTrigger, g_timebase, NULL, 0, NULL, NULL);
 
-		default:
-			return PICO_OK;
+	default:
+		return PICO_OK;
 	}
 }
 
@@ -1692,35 +1695,35 @@ bool EnableMsoPod(size_t npod)
 {
 	g_msoPodEnabled[npod] = true;
 	PICO_CHANNEL podId = (PICO_CHANNEL)(PICO_PORT0 + npod);
-			
+
 	switch(g_pico_type)
 	{
-		case PICO3000A:
+	case PICO3000A:
+	{
+		auto status = ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 1, g_msoPodThreshold[npod][0]);
+		if(status != PICO_OK)
 		{
-			auto status = ps3000aSetDigitalPort(g_hScope, (PS3000A_DIGITAL_PORT)podId, 1, g_msoPodThreshold[npod][0]);
-			if(status != PICO_OK)
-			{
-				LogError("ps3000aSetDigitalPort failed with code %x\n", status);
-				return false;
-			}
-		}			
-		break;
-
-		case PICO6000A:
-		{
-			auto status = ps6000aSetDigitalPortOn(
-				g_hScope,
-				podId,
-				g_msoPodThreshold[npod],
-				8,
-				g_msoHysteresis[npod]);
-			if(status != PICO_OK)
-			{
-				LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
-				return false;
-			}
+			LogError("ps3000aSetDigitalPort failed with code %x\n", status);
+			return false;
 		}
-		break;
+	}
+	break;
+
+	case PICO6000A:
+	{
+		auto status = ps6000aSetDigitalPortOn(
+		                  g_hScope,
+		                  podId,
+		                  g_msoPodThreshold[npod],
+		                  8,
+		                  g_msoHysteresis[npod]);
+		if(status != PICO_OK)
+		{
+			LogError("ps6000aSetDigitalPortOn failed with code %x\n", status);
+			return false;
+		}
+	}
+	break;
 	}
 	return true;
 }

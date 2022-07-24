@@ -46,24 +46,24 @@ void help();
 void help()
 {
 	fprintf(stderr,
-			"ps6000d [general options] [logger options]\n"
-			"\n"
-			"  [general options]:\n"
-			"    --help                        : this message...\n"
-			"    --scpi-port port              : specifies the SCPI control plane port (default 5025)\n"
-			"    --waveform-port port          : specifies the binary waveform data port (default 5026)\n"
-			"\n"
-			"  [logger options]:\n"
-			"    levels: ERROR, WARNING, NOTICE, VERBOSE, DEBUG\n"
-			"    --quiet|-q                    : reduce logging level by one step\n"
-			"    --verbose                     : set logging level to VERBOSE\n"
-			"    --debug                       : set logging level to DEBUG\n"
-			"    --trace <classname>|          : name of class with tracing messages. (Only relevant when logging level is DEBUG.)\n"
-			"            <classname::function>\n"
-			"    --logfile|-l <filename>       : output log messages to file\n"
-			"    --logfile-lines|-L <filename> : output log messages to file, with line buffering\n"
-			"    --stdout-only                 : writes errors/warnings to stdout instead of stderr\n"
-	);
+	        "ps6000d [general options] [logger options]\n"
+	        "\n"
+	        "  [general options]:\n"
+	        "    --help                        : this message...\n"
+	        "    --scpi-port port              : specifies the SCPI control plane port (default 5025)\n"
+	        "    --waveform-port port          : specifies the binary waveform data port (default 5026)\n"
+	        "\n"
+	        "  [logger options]:\n"
+	        "    levels: ERROR, WARNING, NOTICE, VERBOSE, DEBUG\n"
+	        "    --quiet|-q                    : reduce logging level by one step\n"
+	        "    --verbose                     : set logging level to VERBOSE\n"
+	        "    --debug                       : set logging level to DEBUG\n"
+	        "    --trace <classname>|          : name of class with tracing messages. (Only relevant when logging level is DEBUG.)\n"
+	        "            <classname::function>\n"
+	        "    --logfile|-l <filename>       : output log messages to file\n"
+	        "    --logfile-lines|-L <filename> : output log messages to file, with line buffering\n"
+	        "    --stdout-only                 : writes errors/warnings to stdout instead of stderr\n"
+	       );
 }
 
 string g_model;
@@ -152,7 +152,9 @@ int main(int argc, char* argv[])
 			g_pico_type = PICO3000A;
 			picoGetUnitInfo = ps3000aGetUnitInfo;
 		}
-	} else {
+	}
+	else
+	{
 		g_pico_type = PICO6000A;
 		picoGetUnitInfo = ps6000aGetUnitInfo;
 	}
@@ -276,13 +278,15 @@ int main(int argc, char* argv[])
 	case PICO3000A:
 		/* Model 3abcdMSO with
 			a=4 chan, b=0(unknown) c=6(bandwidth 6=200MHz) d=D(revision D)
-			MSO if MSO option is available 
+			MSO if MSO option is available
 			example 3406DMSO (full option)
 		*/
 		if(g_model.find("MSO") > 0)
 		{
 			g_numDigitalPods = 2;
-		} else {
+		}
+		else
+		{
 			g_numDigitalPods = 0;
 		}
 		break;
@@ -308,7 +312,7 @@ int main(int argc, char* argv[])
 
 	//Set up signal handlers
 #ifdef _WIN32
-	SetConsoleCtrlHandler(OnQuit, TRUE);	
+	SetConsoleCtrlHandler(OnQuit, TRUE);
 #else
 	signal(SIGINT, OnQuit);
 	signal(SIGPIPE, SIG_IGN);
@@ -375,7 +379,7 @@ void OnQuit(int /*signal*/)
 	case PICO6000A:
 		ps6000aCloseUnit(g_hScope);
 		break;
-	}	
+	}
 	exit(0);
 }
 
