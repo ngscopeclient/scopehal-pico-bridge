@@ -421,15 +421,17 @@ vector<size_t> PicoSCPIServer::GetSampleDepths()
 	PICO_STATUS status;
 	status = PICO_RESERVED_1;
 
-	//Ask for max memory depth at 1.25 Gsps. Why does legal memory depend on sample rate?
+	//Ask for max memory depth at timebase number 10
+	//We cannot use the first few timebases because those are sometimes not available depending on channel count etc
+	int ntimebase = 10;
 	switch(g_pico_type)
 	{
 		case PICO3000A:
-			status = ps3000aGetTimebase(g_hScope, 2, 1, &intervalNs_int, 0, &maxSamples_int, 0);
+			status = ps3000aGetTimebase(g_hScope, ntimebase, 1, &intervalNs_int, 0, &maxSamples_int, 0);
 			maxSamples = maxSamples_int;
 			break;
 		case PICO6000A:
-			status = ps6000aGetTimebase(g_hScope, 2, 1, &intervalNs, &maxSamples, 0);
+			status = ps6000aGetTimebase(g_hScope, ntimebase, 1, &intervalNs, &maxSamples, 0);
 			break;
 	}
 
