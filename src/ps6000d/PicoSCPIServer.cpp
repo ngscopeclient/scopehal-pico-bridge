@@ -852,6 +852,10 @@ void PicoSCPIServer::AcquisitionStop()
 	lock_guard<mutex> lock(g_mutex);
 
 	Stop();
+
+	//Convert any in-progress trigger to one shot.
+	//This ensures that if a waveform is halfway through being downloaded, we won't re-arm the trigger after it finishes.
+	g_triggerOneShot = true;
 	g_triggerArmed = false;
 }
 
