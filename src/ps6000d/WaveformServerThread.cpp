@@ -187,15 +187,24 @@ void WaveformServerThread()
 		//Do *not* hold mutex while sending data to the client
 		//This can take a long time and we don't want to block the control channel
 		{
-			//Send the channel count to the client
-			if(!client.SendLooped((uint8_t*)&numchans, sizeof(numchans)))
-				break;
+			#pragma pack(push, 1)
+			struct
+			{
+				//Number of channels in the current waveform
+				uint16_t numChannels;
 
-			//Send sample rate to the client
-			if(!client.SendLooped((uint8_t*)&interval, sizeof(interval)))
-				break;
+				//Sample interval.
+				//May be different from m_srate if we changed the rate after the trigger was armed
+				int64_t fs_per_sample;
+			} wfmhdrs;
+			#pragma pack(pop)
+			wfmhdrs.numChannels = numchans;
+			wfmhdrs.fs_per_sample = interval;
 
+			//Send the top level waveform headers
 			//TODO: send overflow flags to client
+			if(!client.SendLooped((uint8_t*)&wfmhdrs, sizeof(wfmhdrs)))
+				break;
 
 			//Interpolate trigger position if we're using an analog level trigger
 			bool triggerIsAnalog = (g_triggerChannel < g_numChannels);
@@ -206,19 +215,28 @@ void WaveformServerThread()
 			//Send data for each channel to the client
 			for(size_t i=0; i<g_channelIDs.size(); i++)
 			{
-				size_t header[2] = {i, numSamples};
-
 				//Analog channels
 				if((i < g_numChannels) && (channelOn[i]) )
 				{
-					//Send channel ID, scale, offset, and memory depth
-					if(!client.SendLooped((uint8_t*)&header, sizeof(header)))
-						break;
+					#pragma pack(push, 1)
+					struct
+					{
+						size_t nchan;
+						size_t numSamples;
+						float scale;
+						float offset;
+						float trigphase;
+					} chdrs;
+					#pragma pack(pop)
 
-					float scale = g_roundedRange[i] / 32512;
-					float offset = g_offsetDuringArm[i];
-					float config[3] = {scale, offset, trigphase};
-					if(!client.SendLooped((uint8_t*)&config, sizeof(config)))
+					chdrs.nchan = i;
+					chdrs.numSamples = numSamples;
+					chdrs.scale = g_roundedRange[i] / 32512;
+					chdrs.offset = g_offsetDuringArm[i];
+					chdrs.trigphase = trigphase;
+
+					//Send channel headers
+					if(!client.SendLooped((uint8_t*)&chdrs, sizeof(chdrs)))
 						break;
 
 					//Send the actual waveform data
@@ -229,9 +247,19 @@ void WaveformServerThread()
 				//Digital channels
 				else if( (i >= g_numChannels) && (msoPodEnabled[i - g_numChannels]) )
 				{
-					if(!client.SendLooped((uint8_t*)&header, sizeof(header)))
-						break;
-					if(!client.SendLooped((uint8_t*)&trigphase, sizeof(trigphase)))
+					#pragma pack(push, 1)
+					struct
+					{
+						size_t nchan;
+						size_t numSamples;
+						float trigphase;
+					} chdrs;
+					#pragma pack(pop)
+					chdrs.nchan = i;
+					chdrs.numSamples = numSamples;
+					chdrs.trigphase = trigphase;
+
+					if(!client.SendLooped((uint8_t*)&chdrs, sizeof(chdrs)))
 						break;
 					if(!client.SendLooped((uint8_t*)waveformBuffers[i], numSamples * sizeof(int16_t)))
 						break;
