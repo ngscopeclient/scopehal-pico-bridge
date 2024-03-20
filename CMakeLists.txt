@@ -11,6 +11,11 @@ set(CMAKE_CXX_FLAGS "-g -fopenmp ${WARNINGS} --std=c++11 -mtune=native -ffast-ma
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -fsanitize=address")
 
+if(APPLE AND ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "arm64")
+	# force x86 build, PicoSDK is only built for Intel macs as of 10.7.26.362, so arm64 can't link against it
+	set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE INTERNAL "" FORCE)
+endif ()
+
 if(WIN32)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_USE_MATH_DEFINES -D_POSIX_THREAD_SAFE_FUNCTIONS")
 endif()
