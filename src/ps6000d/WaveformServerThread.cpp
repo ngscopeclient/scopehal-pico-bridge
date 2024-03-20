@@ -64,7 +64,7 @@ void WaveformServerThread()
 		g_channelIDs.push_back((PICO_CHANNEL)(PICO_PORT0 + i));
 
 	map<size_t, int16_t*> waveformBuffers;
-	size_t numSamples = 0;
+	uint64_t numSamples = 0;
 	uint32_t numSamples_int = 0;
 	uint16_t numchans;
 	while(!g_waveformThreadQuit)
