@@ -7,7 +7,7 @@ set(ANALYZE CACHE BOOL "Run static analysis on the code, requires cppcheck and c
 set(WARNINGS "-Wall -Wextra -Wuninitialized ")
 set(WARNINGS "${WARNINGS} -Wshadow -Wunsafe-loop-optimizations -Wpedantic -Wcast-align -Wwrite-strings")
 set(WARNINGS "${WARNINGS} -Wmissing-declarations -Wvla")
-set(CMAKE_CXX_FLAGS "-g -fopenmp ${WARNINGS} --std=c++11 -ffast-math")
+set(CMAKE_CXX_FLAGS "-g ${WARNINGS} --std=c++11 -ffast-math")
 if(NOT (APPLE AND ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "arm64"))
 	message(${CMAKE_HOST_SYSTEM_PROCESSOR})
 	# we can not build for arm64, but mtune=native will still somehow resolve to apple-m1 or similar,
