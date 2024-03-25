@@ -7,9 +7,22 @@ set(ANALYZE CACHE BOOL "Run static analysis on the code, requires cppcheck and c
 set(WARNINGS "-Wall -Wextra -Wuninitialized ")
 set(WARNINGS "${WARNINGS} -Wshadow -Wunsafe-loop-optimizations -Wpedantic -Wcast-align -Wwrite-strings")
 set(WARNINGS "${WARNINGS} -Wmissing-declarations -Wvla")
-set(CMAKE_CXX_FLAGS "-g -fopenmp ${WARNINGS} --std=c++11 -mtune=native -ffast-math")
+set(CMAKE_CXX_FLAGS "-g ${WARNINGS} --std=c++11 -ffast-math")
+if(NOT (APPLE AND ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "arm64"))
+	message(${CMAKE_HOST_SYSTEM_PROCESSOR})
+	# we can not build for arm64, but mtune=native will still somehow resolve to apple-m1 or similar,
+	# which x86 apple clang does not understand.
+	# Only set mtune=native if we're *not* building on an Apple Silicon host.
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mtune=native")
+endif()
+
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -fsanitize=address")
+
+if(APPLE AND ${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "arm64")
+	# force x86 build, PicoSDK is only built for Intel macs as of 10.7.26.362, so arm64 can't link against it
+	set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE INTERNAL "" FORCE)
+endif ()
 
 if(WIN32)
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_USE_MATH_DEFINES -D_POSIX_THREAD_SAFE_FUNCTIONS")

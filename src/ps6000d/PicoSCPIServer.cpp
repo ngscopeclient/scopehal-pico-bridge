@@ -374,7 +374,7 @@ vector<size_t> PicoSCPIServer::GetSampleRates()
 	{
 		double intervalNs;
 		int32_t intervalNs_int;
-		size_t maxSamples;
+		uint64_t maxSamples;
 		int32_t maxSamples_int;
 		PICO_STATUS status = PICO_RESERVED_1;
 
@@ -415,7 +415,7 @@ vector<size_t> PicoSCPIServer::GetSampleDepths()
 	lock_guard<mutex> lock(g_mutex);
 	double intervalNs;
 	int32_t intervalNs_int;
-	size_t maxSamples;
+	uint64_t maxSamples;
 	int32_t maxSamples_int;
 
 	PICO_STATUS status;
