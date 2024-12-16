@@ -281,7 +281,7 @@ int main(int argc, char* argv[])
 				MSO if MSO option is available
 				example 3406DMSO (full option)
 			*/
-			if(g_model.find("MSO") > 0)
+			if(g_model.find("MSO") != std::string::npos)
 			{
 				g_numDigitalPods = 2;
 			}
@@ -382,4 +382,3 @@ void OnQuit(int /*signal*/)
 	}
 	exit(0);
 }
-
