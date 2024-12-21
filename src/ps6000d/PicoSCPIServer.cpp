@@ -190,6 +190,36 @@ float g_awgRange = 0;
 float g_awgOffset = 0;
 bool g_awgOn = false;
 double g_awgFreq = 1000;
+PS3000A_EXTRA_OPERATIONS g_awgPS3000AOperation = PS3000A_ES_OFF;    // Noise and PRBS generation is not a WaveType
+PS3000A_WAVE_TYPE g_awgPS3000AWaveType = PS3000A_SINE;              // Waveform must be set in ReconfigAWG(), holds the WaveType;
+
+//Struct easily allows for adding ne models
+struct WaveformType
+{
+	PICO_WAVE_TYPE type6000;
+	PS3000A_WAVE_TYPE type3000;
+	PS3000A_EXTRA_OPERATIONS op3000;
+};
+const map<string, WaveformType> g_waveformTypes =
+{
+	{"SINE",      {PICO_SINE,      PS3000A_SINE,      PS3000A_ES_OFF}},
+	{"SQUARE",    {PICO_SQUARE,    PS3000A_SQUARE,    PS3000A_ES_OFF}},
+	{"TRIANGLE",  {PICO_TRIANGLE,  PS3000A_TRIANGLE,  PS3000A_ES_OFF}},
+	{"RAMP_UP",   {PICO_RAMP_UP,   PS3000A_RAMP_UP,   PS3000A_ES_OFF}},
+	{"RAMP_DOWN", {PICO_RAMP_DOWN, PS3000A_RAMP_DOWN, PS3000A_ES_OFF}},
+	{"SINC",      {PICO_SINC,      PS3000A_SINC,      PS3000A_ES_OFF}},
+	{"GAUSSIAN",  {PICO_GAUSSIAN,  PS3000A_GAUSSIAN,  PS3000A_ES_OFF}},
+	{"HALF_SINE", {PICO_HALF_SINE, PS3000A_HALF_SINE, PS3000A_ES_OFF}},
+	{"DC",        {PICO_DC_VOLTAGE,PS3000A_DC_VOLTAGE,PS3000A_ES_OFF}},
+	{"WHITENOISE",{PICO_WHITENOISE,PS3000A_SINE,      PS3000A_WHITENOISE}},
+	{"PRBS",      {PICO_PRBS,      PS3000A_SINE,      PS3000A_PRBS}},
+	{"ARBITRARY", {PICO_ARBITRARY, PS3000A_MAX_WAVE_TYPES, PS3000A_ES_OFF}}       //FIX: PS3000A_MAX_WAVE_TYPES is used as placeholder for arbitrary generation till a better workarround is found
+};
+
+#define SIG_GEN_BUFFER_SIZE         8192                            //TODO: allow model specific/variable buffer size. Must be power of 2 for most AWGs PS3000: 2^13,  PS3207B: 2^14  PS3206B: 2^15
+int16_t* g_arbitraryWaveform = new int16_t[SIG_GEN_BUFFER_SIZE];    //
+void GenerateSquareWave(int16_t* &waveform, size_t bufferSize, double dutyCycle, int16_t amplitude = 32767);
+
 void ReconfigAWG();
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -477,8 +507,49 @@ bool PicoSCPIServer::OnCommand(
 		else if(cmd == "STOP")
 		{
 			lock_guard<mutex> lock(g_mutex);
-			g_awgOn = false;
-			ReconfigAWG();
+			if(g_pico_type == PICO3000A)
+			{
+				/*
+				 * Special handling for Pico3000A series oscilloscopes:
+				 * Since PS3000A lacks a dedicated stop command for signal generation,
+				 * we achieve this by:
+				 * 1. Temporarily setting AWG amplitude and offset to zero
+				 * 2. Switching to software trigger mode
+				 * 3. Restoring original AWG settings
+				 *
+				 * This ensures clean signal termination without residual voltage levels.
+				 */
+				float tempRange = g_awgRange;
+				float tempOffset = g_awgOffset;
+				g_awgRange = 0;
+				g_awgOffset = 0;
+				ReconfigAWG();
+
+				auto status = ps3000aSetSigGenPropertiesBuiltIn(
+								  g_hScope,
+								  g_awgFreq,
+								  g_awgFreq,
+								  0,
+								  0,
+								  PS3000A_SWEEP_TYPE (0),
+								  1,
+								  0,
+								  PS3000A_SIGGEN_RISING,
+								  PS3000A_SIGGEN_SOFT_TRIG,
+								  0
+							  );
+
+				if(status != PICO_OK)
+					LogError("ps3000aSetSigGenPropertiesBuiltIn failed, code 0x%x \n", status);
+
+				g_awgRange = tempRange;
+				g_awgOffset = tempOffset;
+			}
+			else
+			{
+				g_awgOn = false;
+				ReconfigAWG();
+			}
 		}
 
 		else if(args.size() == 1)
@@ -491,13 +562,7 @@ bool PicoSCPIServer::OnCommand(
 				{
 					case PICO3000A:
 					{
-						/* TODO PICO3000A FREQ */
-						LogError("PICO3000A FREQ TODO code\n");
-						/*
-						auto status = ps6000aSigGenFrequency(g_hScope, g_awgFreq);
-						if(status != PICO_OK)
-							LogError("ps6000aSigGenFrequency failed, code 0x%x (freq=%f)\n", status, g_awgFreq);
-						*/
+						//handled by ReconfigAWG()
 					}
 					break;
 
@@ -521,15 +586,12 @@ bool PicoSCPIServer::OnCommand(
 				{
 					case PICO3000A:
 					{
-						/* TODO PICO3000A DUTY */
-						LogError("PICO3000A DUTY TODO code\n");
-						/*
-						auto status = ps6000aSigGenWaveformDutyCycle(g_hScope, duty);
-						if(status != PICO_OK)
-							LogError("ps6000aSigGenWaveformDutyCycle failed, code 0x%x\n", status);
-
-						ReconfigAWG();
-						*/
+						/* DutyCycle of square wave can not be controlled in ps3000a built in generator,
+						Must be implemented via Arbitrary*/
+						if( g_awgPS3000AWaveType  == PS3000A_SQUARE )
+							GenerateSquareWave(g_arbitraryWaveform, SIG_GEN_BUFFER_SIZE, (double) duty);
+						else
+							LogError("PICO3000A DUTY TODO code\n");
 					}
 					break;
 
@@ -543,6 +605,7 @@ bool PicoSCPIServer::OnCommand(
 					}
 					break;
 				}
+				ReconfigAWG();
 			}
 
 			else if(cmd == "OFFS")
@@ -565,61 +628,47 @@ bool PicoSCPIServer::OnCommand(
 			{
 				lock_guard<mutex> lock(g_mutex);
 
-				PICO_WAVE_TYPE type = PICO_SINE;
-				if(args[0] == "SINE")
-					type = PICO_SINE;
-				else if(args[0] == "SQUARE")
-					type = PICO_SQUARE;
-				else if(args[0] == "TRIANGLE")
-					type = PICO_TRIANGLE;
-				else if(args[0] == "RAMP_UP")
-					type = PICO_RAMP_UP;
-				else if(args[0] == "RAMP_DOWN")
-					type = PICO_RAMP_DOWN;
-				else if(args[0] == "SINC")
-					type = PICO_SINC;
-				else if(args[0] == "GAUSSIAN")
-					type = PICO_GAUSSIAN;
-				else if(args[0] == "HALF_SINE")
-					type = PICO_HALF_SINE;
-				else if(args[0] == "DC")
-					type = PICO_DC_VOLTAGE;
-				//PICO_PWM is in header file but doesn't seem to be implemented
-				else if(args[0] == "WHITENOISE")
-					type = PICO_WHITENOISE;
-				else if(args[0] == "PRBS")			//custom 42-bit LFSR, not standard polynomial
-					type = PICO_PRBS;
-				else if(args[0] == "ARBITRARY")		//TODO: specify arb buffer
-					type = PICO_ARBITRARY;
-
-				switch(g_pico_type)
+				auto waveform = g_waveformTypes.find(args[0]);
+				if(waveform == g_waveformTypes.end())
 				{
-					case PICO3000A:
-					{
-						/* TODO PICO3000A SHAPE */
-						LogError("PICO3000A SHAPE TODO code\n");
-						/*
-						//Set waveform type
-						auto status = ps6000aSigGenWaveform(g_hScope, type, NULL, 0);
-						if(PICO_OK != status)
-							LogError("ps6000aSigGenWaveform failed, code 0x%x\n", status);
-
-						ReconfigAWG();
-						*/
-					}
-					break;
-
-					case PICO6000A:
-					{
-						//Set waveform type
-						auto status = ps6000aSigGenWaveform(g_hScope, type, NULL, 0);
-						if(PICO_OK != status)
-							LogError("ps6000aSigGenWaveform failed, code 0x%x\n", status);
-
-						ReconfigAWG();
-					}
-					break;
+					LogError("Invalid waveform type: %s\n", args[0].c_str());
+					return true;
 				}
+
+				if( ( (args[0] == "WHITENOISE") || (args[0] == "RPBS") )
+						&& (g_pico_type == PICO3000A)
+						&& (g_model[4] == 'A' ) )
+				{
+					LogError("Noise/RPBS generation not supported by 3xxxA Models\n");
+					return true;
+				}
+				if( (g_awgPS3000AWaveType  == PS3000A_SQUARE) && (g_pico_type == PICO3000A) )
+				{
+					GenerateSquareWave(g_arbitraryWaveform, SIG_GEN_BUFFER_SIZE, 50);
+				}
+
+				g_awgPS3000AWaveType = waveform->second.type3000;
+				g_awgPS3000AOperation = waveform->second.op3000;
+
+				if(args[0] == "ARBITRARY")
+				{
+					//TODO: find a more flexible way to specify arb buffer
+					if(g_pico_type == PICO3000A)
+						LogError("PICO3000A ARBITRARY TODO code\n");
+					//TODO: ReconfigAWG() can handle this already, must only fill the buffer
+					if(g_pico_type == PICO6000A)
+						LogError("PICO6000A ARBITRARY TODO code\n");
+				}
+
+				if(g_pico_type == PICO6000A)
+				{
+					auto status = ps6000aSigGenWaveform(g_hScope, waveform->second.type6000, NULL, 0);
+					if(PICO_OK != status)
+						LogError("ps6000aSigGenWaveform failed, code 0x%x\n", status);
+
+				}
+
+				ReconfigAWG();
 			}
 			else
 				LogError("Unrecognized AWG command %s\n", line.c_str());
@@ -627,11 +676,13 @@ bool PicoSCPIServer::OnCommand(
 		else
 			LogError("Unrecognized AWG command %s\n", line.c_str());
 	}
+
 	else if(BridgeSCPIServer::OnCommand(line, subject, cmd, args))
 		return true;
 
 	else if( (cmd == "BITS") && (args.size() == 1) )
 	{
+
 		lock_guard<mutex> lock(g_mutex);
 
 		if(g_pico_type != PICO6000A)
@@ -685,35 +736,66 @@ bool PicoSCPIServer::OnCommand(
  */
 void PicoSCPIServer::ReconfigAWG()
 {
-	// TODO PS3000A
+	double freq = g_awgFreq;
+	double inc = 0;
+	double dwell = 0;
+
 	switch(g_pico_type)
 	{
 		case PICO3000A:
 		{
-			/* TODO PICO3000A ReconfigAWG */
-			LogError("PICO3000A ReconfigAWG TODO code\n");
-			/*
-			auto status = ps6000aSigGenRange(g_hScope, g_awgRange, g_awgOffset);
-			if(PICO_OK != status)
-				LogError("ps6000aSigGenRange failed, code 0x%x\n", status);
+			Stop(); // Need to stop aquesition when settign the AWG to avoid "PICO_BUSY" erros
+			if( g_awgPS3000AWaveType == PS3000A_SQUARE || g_awgPS3000AWaveType == PS3000A_MAX_WAVE_TYPES)
+			{
+				uint32_t delta= 0;
+				auto status = ps3000aSigGenFrequencyToPhase(g_hScope, g_awgFreq, PS3000A_SINGLE, SIG_GEN_BUFFER_SIZE, &delta);
+				if(status != PICO_OK)
+					LogError("ps3000aSigGenFrequencyToPhase failed, code 0x%x\n", status);
 
-			double freq = g_awgFreq;
-			double inc = 0;
-			double dwell = 0;
-			status = ps6000aSigGenApply(
-				g_hScope,
-				g_awgOn,
-				false,		//sweep enable
-				false,		//trigger enable
-				true,		//automatic DDS sample frequency
-				false,		//do not override clock and prescale
-				&freq,
-				&freq,
-				&inc,
-				&dwell);
-			if(PICO_OK != status)
-				LogError("ps6000aSigGenApply failed, code 0x%x\n", status);
-			*/
+				status =  ps3000aSetSigGenArbitrary(
+							  g_hScope,
+							  g_awgOffset*1e6,
+							  g_awgRange*1e6*2,
+							  delta,
+							  delta,
+							  0,
+							  0,
+							  g_arbitraryWaveform,
+							  SIG_GEN_BUFFER_SIZE,
+							  PS3000A_UP,          // sweepType
+							  PS3000A_ES_OFF,      // operation
+							  PS3000A_SINGLE,      // indexMode
+							  PS3000A_SHOT_SWEEP_TRIGGER_CONTINUOUS_RUN,
+							  0,
+							  PS3000A_SIGGEN_RISING,
+							  PS3000A_SIGGEN_NONE,
+							  0);
+				if(status != PICO_OK)
+					LogError("ps3000aSetSigGenArbitrary failed, code 0x%x\n", status);
+			}
+			else
+			{
+				auto status = ps3000aSetSigGenBuiltInV2(
+								  g_hScope,
+								  g_awgOffset*1e6,        //Offset Voltage in µV
+								  g_awgRange *1e6*2,      // Peek to Peek Range in µV
+								  g_awgPS3000AWaveType,
+								  freq,
+								  freq,
+								  inc,
+								  dwell,
+								  PS3000A_UP,
+								  g_awgPS3000AOperation,
+								  PS3000A_SHOT_SWEEP_TRIGGER_CONTINUOUS_RUN,  //run forever
+								  0,  //dont use sweeps
+								  PS3000A_SIGGEN_RISING,
+								  PS3000A_SIGGEN_NONE,
+								  0);                         // Tigger level (-32767 to 32767 -> -5 to 5 V)
+				if(PICO_OK != status)
+					LogError("ps3000aSetSigGenBuiltInV2 failed, code 0x%x\n", status);
+			}
+			if(g_triggerArmed)
+				StartCapture(false);
 		}
 		break;
 
@@ -723,9 +805,6 @@ void PicoSCPIServer::ReconfigAWG()
 			if(PICO_OK != status)
 				LogError("ps6000aSigGenRange failed, code 0x%x\n", status);
 
-			double freq = g_awgFreq;
-			double inc = 0;
-			double dwell = 0;
 			status = ps6000aSigGenApply(
 						 g_hScope,
 						 g_awgOn,
@@ -1734,3 +1813,27 @@ bool EnableMsoPod(size_t npod)
 	return true;
 }
 
+void GenerateSquareWave(int16_t* &waveform, size_t bufferSize, double dutyCycle, int16_t amplitude)
+{
+	// Validate inputs
+	if (!waveform || bufferSize == 0)
+	{
+		LogError("GenerateSquareWave has Invalid input \n");
+	}
+
+	// Calculate number of high samples based on duty cycle
+	size_t highSamples = static_cast<size_t>(bufferSize * (dutyCycle / 100.0));
+
+	// Generate square wave
+	for (size_t i = 0; i < bufferSize; i++)
+	{
+		if (i < highSamples)
+		{
+			waveform[i] = amplitude;     // High level
+		}
+		else
+		{
+			waveform[i] = -amplitude;    // Low level
+		}
+	}
+}
