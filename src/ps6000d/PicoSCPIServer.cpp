@@ -1821,8 +1821,6 @@ void PicoSCPIServer::AcquisitionStart(bool oneShot)
 
 void PicoSCPIServer::AcquisitionForceTrigger()
 {
-	lock_guard<mutex> lock(g_mutex);
-
 	//Clear out any old trigger config
 	if(g_triggerArmed)
 	{
@@ -1830,15 +1828,17 @@ void PicoSCPIServer::AcquisitionForceTrigger()
 		g_triggerArmed = false;
 	}
 
+	lock_guard<mutex> lock(g_mutex);
+
 	UpdateTrigger(true);
 	StartCapture(true, true);
 }
 
 void PicoSCPIServer::AcquisitionStop()
 {
-	lock_guard<mutex> lock(g_mutex);
-
 	Stop();
+
+	lock_guard<mutex> lock(g_mutex);
 
 	//Convert any in-progress trigger to one shot.
 	//This ensures that if a waveform is halfway through being downloaded, we won't re-arm the trigger after it finishes.
