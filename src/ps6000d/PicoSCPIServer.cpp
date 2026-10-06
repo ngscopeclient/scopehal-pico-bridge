@@ -64,6 +64,9 @@
 		[chan]:OFFS [num]
 			Sets channel offset to num volts
 
+		[chan]:OFLIM
+			Returns the channel's offset limit in volts
+
 		[chan]:ON
 			Turns the channel on
 
@@ -501,6 +504,50 @@ bool PicoSCPIServer::OnQuery(
 				break;
 		}
 		SendReply(ret);
+	}
+
+	else if(cmd == "OFLIM")
+	{
+		lock_guard<mutex> lock(g_mutex);
+		string ret = "0";
+
+		double maxoff;
+		double minoff;
+		float maxoff_f;
+		float minoff_f;
+
+		switch(g_pico_type)
+		{
+			case PICO2000A:
+				ps2000aGetAnalogueOffset(g_hScope, g_range_2000a[channelId], (PS2000A_COUPLING)g_coupling[channelId], &maxoff_f, &minoff_f);
+				maxoff = maxoff_f;
+				minoff = minoff_f;
+				break;
+			case PICO3000A:
+				ps3000aGetAnalogueOffset(g_hScope, g_range_3000a[channelId], (PS3000A_COUPLING)g_coupling[channelId], &maxoff_f, &minoff_f);
+				maxoff = maxoff_f;
+				minoff = minoff_f;
+				break;
+			case PICO4000A:
+				ps4000aGetAnalogueOffset(g_hScope, g_range[channelId], (PS4000A_COUPLING)g_coupling[channelId], &maxoff_f, &minoff_f);
+				maxoff = maxoff_f;
+				minoff = minoff_f;
+				break;
+			case PICO5000A:
+				ps5000aGetAnalogueOffset(g_hScope, g_range_5000a[channelId], (PS5000A_COUPLING)g_coupling[channelId], &maxoff_f, &minoff_f);
+				maxoff = maxoff_f;
+				minoff = minoff_f;
+				break;
+			case PICO6000A:
+				ps6000aGetAnalogueOffsetLimits(g_hScope, g_range[channelId], g_coupling[channelId], &maxoff, &minoff);
+				break;
+			case PICOPSOSPA:
+				psospaGetAnalogueOffsetLimits(g_hScope, -g_range_3000e[channelId], g_range_3000e[channelId], PICO_X1_PROBE_NV, g_coupling[channelId], &maxoff, &minoff);
+				break;
+		}
+		ret = to_string(maxoff);
+		SendReply(ret);
+		//LogDebug("OFLIM: %s\n", ret.c_str());
 	}
 
 	else

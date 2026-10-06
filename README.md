@@ -25,11 +25,11 @@ Socket servers for Pico Technology instruments allowing remote access via libsco
 
 Currently supported are these six APIs from Pico Technology: **ps2000a, ps3000a, ps4000a, ps5000a, ps6000a, psospa**.
 Note that these are all "A APIs" and thus do not support some older and discontinued models.
-As of January 2026 there should be a total of **98** individual devices supported, listed here for reference:
+As of February 2026 there should be a total of **98** individual devices supported, listed here for reference:
 
 | ps2000aApi | ps3000aApi | psospaApi | ps4000aApi | ps5000aApi | ps6000aApi |
 | :---- | :---- | :---- | :---- | :---- | :---- |
-| 2205 MSO | 3203D | 3415E | 4224A | 5242A | 6403E |
+| (2205 MSO) | 3203D | 3415E | 4224A | 5242A | 6403E |
 | **2205A MSO** | 3203D MSO | 3415E MSO | 4424A | 5242B | 6404E |
 | 2206 | 3204A | 3416E | 4444 | 5242D | 6405E |
 | 2206A | 3204B | 3416E MSO | **4824** | 5242D MSO | 6406E |
@@ -65,6 +65,8 @@ As of January 2026 there should be a total of **98** individual devices supporte
 
 Models shown in bold were used for, and tested during, the development of the pico-bridge.
 
+The model **2205 MSO** is only supported with the Pico SDK up to version **2.2.152.6542**, which will continue to be available from the [Downloads > Discontinued products](https://www.picotech.com/downloads) page of the Pico Technology website.
+
 
 ## How to compile
 
@@ -94,10 +96,9 @@ The process to build from source is basically [the same as for ngscopeclient](ht
     cd ~ 
     git clone --recursive https://github.com/ngscopeclient/scopehal-pico-bridge
     ```
-
-    **All following steps are to be done in a UCRT64 shell.**
-
 6.
+	Add your MSYS2 bin folder to your Windows $PATH variable, i.e. "C:\msys64\ucrt64\bin" if you installed it to "C:\msys64".
+7.
     Build manually:
     ```
     cd scopehal-pico-bridge
@@ -106,7 +107,7 @@ The process to build from source is basically [the same as for ngscopeclient](ht
     cmake ..
     ninja -j4
     ```
-	If the build fails with a lot of missing files, try adding your MSYS2 bin folder to your $PATH variable, i.e. "C:\msys64\ucrt64\bin" if you installed it to "C:\msys64".
-7.
+8.
     To run scopehal-pico-bridge:
     The binary can be found in the build directory, such as $HOME\scopehal-pico-bridge\build\src\ps6000d.
+    Start ps6000d.exe from the Windows Explorer. You may need to move liblog.dll from \build\lib\log into \build\src\ps6000d first.
